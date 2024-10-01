@@ -47,6 +47,7 @@ c_HRV_save = string(c_dataout,"HRV_1936_1940_LPZ.jld")
 # EQ save files
 c_oldEQ_save = string(c_dataout,"HRV_1936_1940_LPZ_oldEQ.jld")
 # search parameters
+deplim = 50
 surfvel = 3.0 # surface wave velocity km/s
 windowstart = -Dates.Minute(05)
 windowend = Dates.Minute(55) # window for surface waves
@@ -151,6 +152,15 @@ else
     end 
     print(string("Read ",length(oldEQtme)," events from ",c_old_ISC,"...\n"))
 
+    ## THROW OUT DEEP EVENTS
+    bidx = findall(oldEQdep.>deplim)
+    oldEQdep[bidx] = []
+    oldEQmag[bidx] = []
+    oldEQlat[bidx] = []
+    oldEQlon[bidx] = []
+    oldEQtme[bidx] = []
+    print(string("Threw out ",length(bidx)," events for being too deep. ",length(oldEQtme)," events remaining...\n"))
+
     ## FIND ANALOG EVENTS COVERED
     oldEQtrace = []
     oldEQspect = []
@@ -161,7 +171,7 @@ else
     if !isdir(string(c_dataout,"oldevents/"))
         mkdir(string(c_dataout,"oldevents/"))
     end
-    for i in ProgressBar(1:lastindex(oldEQtme))
+    for i in 1:lastindex(oldEQtme)
         # get distance
         dtmp = Geodesics.surface_distance(hrv_lon,hrv_lat,oldEQlon[i],oldEQlat[i],Ga)
         dtmp = dtmp/1000 # convert to km from m
@@ -196,9 +206,9 @@ else
             hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
             display(hpall)
             # check with user if data is appropro
-            print("\nUse this event?\n\n")
+            print(string("\nUse data for event ",i,"/",length(oldEQtme),"?\n\n"))
             usedata = readline()
-            if usedata
+            if usedata=="y" | usedata=="Y"
                 # save plot
                 savefig(hpall,string(c_dataout,"oldevents/",Dates.format(oldEQtme[i],"yyyymmddTHHMMSS"),".pdf"))
                 # save PSD and trace
