@@ -48,10 +48,10 @@ c_HRV_save = string(c_dataout,"HRV_1936_1940_LPZ.jld")
 c_oldEQ_save = string(c_dataout,"HRV_1936_1940_LPZ_oldEQ.jld")
 # search parameters
 deplim = 50
-magmin = 6.5
+magmin = 7.0
 surfvel = 3.33 # surface wave velocity km/s
-windowstart = -Dates.Minute(15)
-windowend = Dates.Minute(45) # window for surface waves
+windowstart = -Dates.Minute(30)
+windowend = Dates.Minute(30) # window for surface waves
 datathresh = 0.9 # data coverage required in window
 hrv_lat = 42.5060
 hrv_lon = 71.5580
