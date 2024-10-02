@@ -208,7 +208,7 @@ else
             hpw = plot(oldT[targidx],tracetmp,lc=:black,legend=false,ylabel="pixels",
                 title=string(Dates.format(oldEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
                     "; M",oldEQmag[i],"; (",oldEQlat[i],", ",oldEQlon[i],", ",oldEQdep[i],
-                    "); ",round(dtmp),"km -> ",ttime/1000,"s"))
+                    "); ",round(dtmp),"km (",round(dtmp/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
             hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
                 label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
             plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
@@ -258,7 +258,7 @@ else
                     hpw = plot(oldT[targidx],tracetmp,lc=:black,legend=false,ylabel="pixels",
                         title=string(Dates.format(oldEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
                             "; M",oldEQmag[i],"; (",oldEQlat[i],", ",oldEQlon[i],", ",oldEQdep[i],
-                            "); ",round(dtmp),"km -> ",ttime/1000,"s"))
+                            "); ",round(dtmp),"km (",round(dtmp/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
                     hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
                         label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
                     plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
