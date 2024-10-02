@@ -48,9 +48,10 @@ c_HRV_save = string(c_dataout,"HRV_1936_1940_LPZ.jld")
 c_oldEQ_save = string(c_dataout,"HRV_1936_1940_LPZ_oldEQ.jld")
 # search parameters
 deplim = 50
-surfvel = 3.0 # surface wave velocity km/s
-windowstart = -Dates.Minute(05)
-windowend = Dates.Minute(55) # window for surface waves
+magmin = 6.5
+surfvel = 3.33 # surface wave velocity km/s
+windowstart = -Dates.Minute(15)
+windowend = Dates.Minute(45) # window for surface waves
 datathresh = 0.9 # data coverage required in window
 hrv_lat = 42.5060
 hrv_lon = 71.5580
@@ -154,12 +155,21 @@ else
 
     ## THROW OUT DEEP EVENTS
     bidx = findall(oldEQdep.>deplim)
-    oldEQdep[bidx] = []
-    oldEQmag[bidx] = []
-    oldEQlat[bidx] = []
-    oldEQlon[bidx] = []
-    oldEQtme[bidx] = []
+    deleteat!(oldEQdep,bidx)
+    deleteat!(oldEQmag,bidx)
+    deleteat!(oldEQlat,bidx)
+    deleteat!(oldEQlon,bidx)
+    deleteat!(oldEQtme,bidx)
     print(string("Threw out ",length(bidx)," events for being too deep. ",length(oldEQtme)," events remaining...\n"))
+
+    ## THROW OUT DEEP EVENTS
+    bidx = findall(oldEQmag.<magmin)
+    deleteat!(oldEQdep,bidx)
+    deleteat!(oldEQmag,bidx)
+    deleteat!(oldEQlat,bidx)
+    deleteat!(oldEQlon,bidx)
+    deleteat!(oldEQtme,bidx)
+    print(string("Threw out ",length(bidx)," events for being too small. ",length(oldEQtme)," events remaining...\n"))
 
     ## FIND ANALOG EVENTS COVERED
     oldEQtrace = []
@@ -206,9 +216,9 @@ else
             hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
             display(hpall)
             # check with user if data is appropro
-            print(string("\nUse data for event ",i,"/",length(oldEQtme),"?\n\n"))
+            print(string("\nUse data for event ",i,"/",length(oldEQtme),"?\n  "))
             usedata = readline()
-            if usedata=="y" | usedata=="Y"
+            if (usedata=="y") | (usedata=="Y")
                 # save plot
                 savefig(hpall,string(c_dataout,"oldevents/",Dates.format(oldEQtme[i],"yyyymmddTHHMMSS"),".pdf"))
                 # save PSD and trace
@@ -229,7 +239,17 @@ else
         end
     end
     # delete the dataless events
-
+    bidx = map(x->isnan(tmp[x][1])&(length(tmp[x]==1)),1:lastindex(tmp))
+    deleteat!(oldEQdep,bidx)
+    deleteat!(oldEQmag,bidx)
+    deleteat!(oldEQlat,bidx)
+    deleteat!(oldEQlon,bidx)
+    deleteat!(oldEQtme,bidx)
+    deleteat!(oldEQtrace,bidx)
+    deleteat!(oldEQspect,bidx)
+    deleteat!(oldEQspectF,bidx)
+    print(string("Removed ",length(bidx)," events without data or nice arrivals, ",
+        length(oldEQtme)," events remaining...\n"))
     # save
     save(c_oldEQ_save,
         "oldEQtme",oldEQtme,
