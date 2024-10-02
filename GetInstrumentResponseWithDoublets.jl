@@ -236,10 +236,10 @@ else
                     push!(oldEQtrace,[NaN])
                     push!(oldEQspect,[NaN])
                     push!(oldEQspectF,[NaN])
-                elseif ((usedata[1]=="f") | (usedata[1]=="F")) | ((usedata[1]=="r") | (usedata[1]=="R"))
+                elseif ((usedata[1]=='f') | (usedata[1]=='F')) | ((usedata[1]=='r') | (usedata[1]=='R'))
                     # move the window
                     tshft = Dates.Minute(parse(Int,usedata[2:end]))
-                    if ((usedata[1]=="r") | (usedata[1]=="r")) # back
+                    if ((usedata[1]=='r') | (usedata[1]=='R')) # back
                         tshft = -tshft
                     end
                     stime = oldEQtme[i] + Dates.Millisecond(ttime) + windowstart + tshft
