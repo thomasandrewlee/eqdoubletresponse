@@ -277,7 +277,7 @@ else
         end
     end
     # delete the dataless events
-    bidx = map(x->isnan(tmp[x][1])&(length(tmp[x]==1)),1:lastindex(tmp))
+    bidx = map(x->isnan(oldEQtrace[x][1])&(length(oldEQtrace[x]==1)),1:lastindex(oldEQtrace))
     deleteat!(oldEQdep,bidx)
     deleteat!(oldEQmag,bidx)
     deleteat!(oldEQlat,bidx)
