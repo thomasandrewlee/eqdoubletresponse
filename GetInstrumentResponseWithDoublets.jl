@@ -216,20 +216,58 @@ else
             hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
             display(hpall)
             # check with user if data is appropro
-            print(string("\nUse data for event ",i,"/",length(oldEQtme),"?\n  "))
-            usedata = readline()
-            if (usedata=="y") | (usedata=="Y")
-                # save plot
-                savefig(hpall,string(c_dataout,"oldevents/",Dates.format(oldEQtme[i],"yyyymmddTHHMMSS"),".pdf"))
-                # save PSD and trace
-                push!(oldEQspect,specttmpPSD)
-                push!(oldEQspectF,specttmpF)
-                push!(oldEQtrace,tracetmp)
-            else
-                # fill with NaN for the new fields
-                push!(oldEQtrace,[NaN])
-                push!(oldEQspect,[NaN])
-                push!(oldEQspectF,[NaN])
+            done = false
+            while !done
+                print(string("\nUse data for event ",i,"/",length(oldEQtme),"?\n  "))
+                usedata = readline()
+                if (usedata=="y") | (usedata=="Y")
+                    # set done to true
+                    done = true
+                    # save plot
+                    savefig(hpall,string(c_dataout,"oldevents/",Dates.format(oldEQtme[i],"yyyymmddTHHMMSS"),".pdf"))
+                    # save PSD and trace
+                    push!(oldEQspect,specttmpPSD)
+                    push!(oldEQspectF,specttmpF)
+                    push!(oldEQtrace,tracetmp)
+                elseif (usedata=="n") | (usedata=="N")
+                    # set done to true
+                    done = true
+                    # fill with NaN for the new fields
+                    push!(oldEQtrace,[NaN])
+                    push!(oldEQspect,[NaN])
+                    push!(oldEQspectF,[NaN])
+                elseif ((usedata[1]=="f") | (usedata[1]=="F")) | ((usedata[1]=="r") | (usedata[1]=="R"))
+                    # move the window
+                    tshft = Dates.Minute(parse(Int,usedata[2:end]))
+                    if ((usedata[1]=="r") | (usedata[1]=="r")) # back
+                        tshft = -tshft
+                    end
+                    stime = oldEQtme[i] + Dates.Millisecond(ttime) + windowstart + tshft
+                    etime = oldEQtme[i] + Dates.Millisecond(ttime) + windowend + tshft
+                    targidx = findall(stime .<= oldT .<= etime)
+                    tracetmp = oldD[targidx]
+                    tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(targidx)/10)))
+                    # calculate fft
+                    noNaNtrace = oldD[targidx]
+                    noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
+                    specttmpD = FFTW.rfft(noNaNtrace)
+                    specttmpF = FFTW.rfftfreq(length(targidx),1/(Dates.value(oldsamprate)/1000))
+                    # convert to PSD
+                    specttmpPSD = 2*(1/((Dates.value(oldsamprate)/1000)*length(targidx))).*(abs.(specttmpD).^2)
+                    # plot and write out waveform and spectras
+                    hpw = plot(oldT[targidx],tracetmp,lc=:black,legend=false,ylabel="pixels",
+                        title=string(Dates.format(oldEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
+                            "; M",oldEQmag[i],"; (",oldEQlat[i],", ",oldEQlon[i],", ",oldEQdep[i],
+                            "); ",round(dtmp),"km -> ",ttime/1000,"s"))
+                    hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
+                        label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
+                    plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
+                        # smoothing is roughly a 1Hz window
+                    hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
+                    display(hpall)
+                else
+                    print(string("  !!! unrecognized option: ",usedata,"\n"))
+                end
             end
         else # if there is no data
             # fill with NaN for the new fields to go back and delete later
