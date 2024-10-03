@@ -38,7 +38,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "TEST"
+c_runname = "TEST/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -49,11 +49,11 @@ c_HRV_save = string(c_dataout,"HRV_1936_1940_LPZ.jld")
 station_gains_file = [] # use this empty to avoid correcting gains
 station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
 # EQ save files
-c_oldEQ_save = string(c_dataout,"HRV_1936_1940_LPZ_oldEQ.jld")
-c_newEQ_save = string(c_dataout,"HRV_1988_2023_BHZ_newEQ.jld")
+c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
+c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
-magmin = 7.0 # smallest allowable mag
+magmin = 6.8 # smallest allowable mag
 distdiff = 10 # allowable distance difference (km)
 depdiff = 10 # allowable depth difference (km)
 magdiff = 0.2
@@ -324,6 +324,7 @@ else # build old EQ events
     deleteat!(oldEQtraceT,bidx)
     deleteat!(oldEQspect,bidx)
     deleteat!(oldEQspectF,bidx)
+    deleteat!(oldEQID,bidx)
     print(string("Removed ",length(bidx)," events without data or nice arrivals, ",
         length(oldEQtme)," events remaining...\n"))
     # save
@@ -337,6 +338,7 @@ else # build old EQ events
         "oldEQtraceT",oldEQtraceT,
         "oldEQspect",oldEQspect,
         "oldEQspectF",oldEQspectF,
+        "oldEQID",oldEQID,
     )
     # report
     print(string("Found and saved ",length(oldEQtme)," events for historical HRV...\n"))
@@ -356,6 +358,7 @@ if isfile(c_newEQ_save)
     newEQspect = tmpvar["newEQspect"]
     newEQspectF = tmpvar["newEQspectF"]
     newEQmatch = tmpvar["newEQmatch"]
+    newEQID = tmpvar["newEQID"]
     tmpvar = []
 else 
     ## LOAD MODERN ISC CATALOG
@@ -425,14 +428,15 @@ else
         dtmp = Geodesics.surface_distance.(newEQlon[i],newEQlat[i],oldEQlon[oldidx],oldEQlat[oldidx],Ga)
         dtmp = dtmp./1000 # m to km
         oldidx2 = oldidx[findall(dtmp.<=distdiff)]
-        if !isempty(oldidx2)
+        # check magnitude
+        oldidx3 = oldidx2[findall(newEQmag[i]-magdiff .<= oldEQmag[oldidx2] .<= newEQmag[i]+magdiff)]
+        if !isempty(oldidx3)
             # error(string("i=",i))
-            # save match info
+            # get match info
             matchID = map(x->string(
-                    Dates.format(oldEQtme[oldidx2[x]],"yyyymmdd_HHMM"),
+                    Dates.format(oldEQtme[oldidx3[x]],"yyyymmdd_HHMM"),
                     "_M",oldEQmag[oldidx2[x]]),
                 1:lastindex(oldidx2))
-            push!(newEQmatch,matchID)
             # get distance to HRV
             dHRV = Geodesics.surface_distance(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
             dHRV = dHRV/1000 # convert to km from m
@@ -528,5 +532,38 @@ else
             push!(newEQID,"")
         end
     end
+    # delete the dataless events
+    bidx = findall(map(x->isnan(newEQtrace[x][1])&(length(newEQtrace[x])==1),1:lastindex(newEQtrace)))
+    deleteat!(newEQdep,bidx)
+    deleteat!(newEQmag,bidx)
+    deleteat!(newEQlat,bidx)
+    deleteat!(newEQlon,bidx)
+    deleteat!(newEQtme,bidx)
+    deleteat!(newEQtrace,bidx)
+    deleteat!(newEQtraceT,bidx)
+    deleteat!(newEQspect,bidx)
+    deleteat!(newEQspectF,bidx)
+    deleteat!(newEQmatch,bidx)
+    deleteat!(newEQID,bidx)
+    print(string("Removed ",length(bidx)," events without data or nice arrivals, ",
+        length(newEQtme)," events remaining...\n"))
+    # save
+    save(c_newEQ_save,
+        "newEQtme",newEQtme,
+        "newEQlat",newEQlat,
+        "newEQlon",newEQlon,
+        "newEQdep",newEQdep,
+        "newEQmag",newEQmag,
+        "newEQtrace",newEQtrace,
+        "newEQtraceT",newEQtraceT,
+        "newEQspect",newEQspect,
+        "newEQspectF",newEQspectF,
+        "newEQmatch",newEQmatch,
+        "newEQID",newEQID,
+    )
+    # report
+    print(string("Found and saved ",length(newEQtme)," events for modern HRV...\n"))
 end
+print(string())
 
+## DO THE COMPARISON FOR EXISTING MATCHES
