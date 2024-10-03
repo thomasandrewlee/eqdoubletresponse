@@ -38,7 +38,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "TEST/" # make sure to add '/' to get folder
+c_runname = "TEST6.5/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -53,9 +53,9 @@ c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
-magmin = 6.8 # smallest allowable mag
-distdiff = 10 # allowable distance difference (km)
-depdiff = 10 # allowable depth difference (km)
+magmin = 6.5 # smallest allowable mag
+distdiff = 15 # allowable distance difference (km)
+depdiff = 20 # allowable depth difference (km)
 magdiff = 0.2
 surfvel = 3.33 # surface wave velocity km/s
 oldEQmanualcheck = false # run GUI to check waveforms
@@ -431,7 +431,7 @@ else
         # check magnitude
         oldidx3 = oldidx2[findall(newEQmag[i]-magdiff .<= oldEQmag[oldidx2] .<= newEQmag[i]+magdiff)]
         if !isempty(oldidx3)
-            # error(string("i=",i))
+            print(string("i=",i,"\n"))
             # get match info
             matchID = map(x->string(
                     Dates.format(oldEQtme[oldidx3[x]],"yyyymmdd_HHMM"),
@@ -456,72 +456,82 @@ else
                     endtime=Dates.format(etime,"yyyy-mm-ddTHH:MM:SS"))
             end
             Stmp = get_data(statmp,stime,etime)
-            # get trace data and delta out
-            traceTtmp = lf.gettime(Stmp[1])
-            tracetmp = trace(Stmp[1])
-            # initialize new data and time vectors
-            samprate = unique(diff(traceTtmp))
-            if length(samprate)==1
-                samprate = samprate[1]
-            else
-                samprate = mode(samprate)
-                print("WARNING!!! sample rates are not the same!! using mode! \n")
-            end
-            # read gain (assuming flat response, not a bad one for BB HRV)
-            if !isempty(station_gains_file)
-                global gain_stime = [] # start of time periods
-                global gain_etime = [] # end of time periods
-                global gain = [] # gain for that time period (counts / (m/s))
-                if isempty(gain)# if gains file hasn't been read yet
-                    # read in the gain file
-                    ln = open(station_gains_file) do f
-                        readlines(f)
-                    end
-                    for il = 3:lastindex(ln) # skip header line
-                        commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
-                        push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
-                        push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
-                        push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
-                    end 
+            if !isempty(Stmp)
+                # get trace data and delta out
+                traceTtmp = lf.gettime(Stmp[1])
+                tracetmp = trace(Stmp[1])
+                # initialize new data and time vectors
+                samprate = unique(diff(traceTtmp))
+                if length(samprate)==1
+                    samprate = samprate[1]
+                else
+                    samprate = mode(samprate)
+                    print("WARNING!!! sample rates are not the same!! using mode! \n")
                 end
-                # find right gain and correct 
-                traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
-                for j = 1:lastindex(gain)
-                    tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
-                    if !isempty(tidx)
-                        traceGtmp[tidx] .= gain[j] 
+                # read gain (assuming flat response, not a bad one for BB HRV)
+                if !isempty(station_gains_file)
+                    global gain_stime = [] # start of time periods
+                    global gain_etime = [] # end of time periods
+                    global gain = [] # gain for that time period (counts / (m/s))
+                    if isempty(gain)# if gains file hasn't been read yet
+                        # read in the gain file
+                        ln = open(station_gains_file) do f
+                            readlines(f)
+                        end
+                        for il = 3:lastindex(ln) # skip header line
+                            commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
+                            push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
+                            push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
+                            push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
+                        end 
                     end
+                    # find right gain and correct 
+                    traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
+                    for j = 1:lastindex(gain)
+                        tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
+                        if !isempty(tidx)
+                            traceGtmp[tidx] .= gain[j] 
+                        end
+                    end
+                    tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
                 end
-                tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
+                # subtract non-paramteric trend
+                tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
+                # calculate fft
+                noNaNtrace = deepcopy(tracetmp)
+                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
+                specttmpD = FFTW.rfft(noNaNtrace)
+                specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
+                # convert to PSD
+                specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
+                # plot and write out waveform and spectras
+                hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="pixels",
+                    title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
+                        "; M",newEQmag[i],"; (",newEQlat[i],", ",newEQlon[i],", ",newEQdep[i],
+                        "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
+                hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
+                    label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
+                plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
+                    # smoothing is roughly a 1Hz window
+                hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
+                # save data and plot
+                ID = string(Dates.format(oldEQtme[i],"yyyymmdd_HHMM"),"_M",oldEQmag[i])
+                savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
+                push!(newEQtrace,tracetmp)
+                push!(newEQtraceT,tracetmp)
+                push!(newEQspect,specttmpPSD)
+                push!(newEQspectF,specttmpF)
+                push!(newEQmatch,matchID)
+                push!(newEQID,ID)
+            else # no data from IRIS case
+                # fill with NaN for the new fields to go back and delete later
+                push!(newEQtrace,[NaN])
+                push!(newEQtraceT,[NaN])
+                push!(newEQspect,[NaN])
+                push!(newEQspectF,[NaN])
+                push!(newEQmatch,[NaN])
+                push!(newEQID,"")
             end
-            # subtract non-paramteric trend
-            tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
-            # calculate fft
-            noNaNtrace = deepcopy(tracetmp)
-            noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
-            specttmpD = FFTW.rfft(noNaNtrace)
-            specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
-            # convert to PSD
-            specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
-            # plot and write out waveform and spectras
-            hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="pixels",
-                title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
-                    "; M",newEQmag[i],"; (",newEQlat[i],", ",newEQlon[i],", ",newEQdep[i],
-                    "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
-            hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
-                label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
-            plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
-                # smoothing is roughly a 1Hz window
-            hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
-            # save data and plot
-            ID = string(Dates.format(oldEQtme[i],"yyyymmdd_HHMM"),"_M",oldEQmag[i])
-            savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
-            push!(newEQtrace,tracetmp)
-            push!(newEQtraceT,tracetmp)
-            push!(newEQspect,specttmpPSD)
-            push!(newEQspectF,specttmpF)
-            push!(newEQmatch,matchID)
-            push!(newEQID,ID)
         else
             # fill with NaN for the new fields to go back and delete later
             push!(newEQtrace,[NaN])
