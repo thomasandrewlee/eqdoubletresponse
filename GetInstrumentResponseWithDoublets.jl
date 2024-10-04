@@ -38,7 +38,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "TEST6.5/" # make sure to add '/' to get folder
+c_runname = "TEST6.0/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -53,7 +53,7 @@ c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
-magmin = 6.5 # smallest allowable mag
+magmin = 6.0 # smallest allowable mag
 distdiff = 15 # allowable distance difference (km)
 depdiff = 20 # allowable depth difference (km)
 magdiff = 0.2
@@ -419,26 +419,31 @@ else
     if !isdir(string(c_dataout,c_runname,"newevents"))
         mkdir(string(c_dataout,c_runname,"newevents"))
     end
-    for i in ProgressBar(1:lastindex(newEQtme))
+    # setup geodesic
+    Ga, Gf = Geodesics.EARTH_R_MAJOR_WGS84, Geodesics.F_WGS84
+    for i in 1:lastindex(newEQtme)
+        print(string("i=",i,"\n")) # error on 861
         # check depths
         oldidx = findall(newEQdep[i]-depdiff .<= oldEQdep .<= newEQdep[i]+depdiff)
-        # setup geodesic
-        Ga, Gf = Geodesics.EARTH_R_MAJOR_WGS84, Geodesics.F_WGS84
-        # check proximity
-        dtmp = Geodesics.surface_distance.(newEQlon[i],newEQlat[i],oldEQlon[oldidx],oldEQlat[oldidx],Ga)
+        # check proximity 
+            # THIS TAKES WAY TOO LONG!! SHOULD I USE THE EXPLICIT GC FORMULA?? IMPLEMENT IN LF??
+        dtmp = map(x-> Geodesics.surface_distance.(
+                    newEQlon[i],newEQlat[i],
+                    oldEQlon[oldidx[x]],oldEQlat[oldidx[x]],Ga),
+                x=1:lastindex(oldidx))
         dtmp = dtmp./1000 # m to km
         oldidx2 = oldidx[findall(dtmp.<=distdiff)]
         # check magnitude
         oldidx3 = oldidx2[findall(newEQmag[i]-magdiff .<= oldEQmag[oldidx2] .<= newEQmag[i]+magdiff)]
         if !isempty(oldidx3)
-            print(string("i=",i,"\n"))
+            # print(string("i=",i,"\n"))
             # get match info
             matchID = map(x->string(
                     Dates.format(oldEQtme[oldidx3[x]],"yyyymmdd_HHMM"),
                     "_M",oldEQmag[oldidx2[x]]),
                 1:lastindex(oldidx2))
             # get distance to HRV
-            dHRV = Geodesics.surface_distance(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
+            dHRV = Geodesics.surface_distance.(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
             dHRV = dHRV/1000 # convert to km from m
             # estimate travel time
             ttime = dHRV/surfvel # seconds
@@ -515,7 +520,7 @@ else
                     # smoothing is roughly a 1Hz window
                 hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
                 # save data and plot
-                ID = string(Dates.format(oldEQtme[i],"yyyymmdd_HHMM"),"_M",oldEQmag[i])
+                ID = string(Dates.format(newEQtme[i],"yyyymmdd_HHMM"),"_M",newEQmag[i])
                 savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
                 push!(newEQtrace,tracetmp)
                 push!(newEQtraceT,tracetmp)
