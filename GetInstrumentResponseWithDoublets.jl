@@ -54,8 +54,8 @@ c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
-distdiff = 15 # allowable distance difference (km)
-depdiff = 20 # allowable depth difference (km)
+distdiff = 50 # allowable distance difference (km)
+depdiff = 25 # allowable depth difference (km)
 magdiff = 0.2
 surfvel = 3.33 # surface wave velocity km/s
 oldEQmanualcheck = false # run GUI to check waveforms
@@ -421,8 +421,8 @@ else
     end
     # setup geodesic
     Ga, Gf = Geodesics.EARTH_R_MAJOR_WGS84, Geodesics.F_WGS84
-    for i in 1:lastindex(newEQtme)
-        print(string("i=",i,"\n")) # error on 861
+    for i in ProgressBar(1:lastindex(newEQtme))
+        #print(string("i=",i,"\n")) # error on 861
         # check depths
         oldidx = findall(newEQdep[i]-depdiff .<= oldEQdep .<= newEQdep[i]+depdiff)
         # check proximity 
