@@ -202,7 +202,7 @@ else # build old EQ events
     end
     for i in ProgressBar(1:lastindex(oldEQtme))
         # get distance
-        dtmp = Geodesics.surface_distance(hrv_lon,hrv_lat,oldEQlon[i],oldEQlat[i],Ga)
+        dtmp = lf.gcdist(hrv_lon,hrv_lat,oldEQlon[i],oldEQlat[i],Ga)
         dtmp = dtmp/1000 # convert to km from m
         # estimate travel time
         ttime = dtmp/surfvel # seconds
@@ -426,11 +426,7 @@ else
         # check depths
         oldidx = findall(newEQdep[i]-depdiff .<= oldEQdep .<= newEQdep[i]+depdiff)
         # check proximity 
-            # THIS TAKES WAY TOO LONG!! SHOULD I USE THE EXPLICIT GC FORMULA?? IMPLEMENT IN LF??
-        dtmp = map(x-> Geodesics.surface_distance.(
-                    newEQlon[i],newEQlat[i],
-                    oldEQlon[oldidx[x]],oldEQlat[oldidx[x]],Ga),
-                x=1:lastindex(oldidx))
+        dtmp = lf.gcdist(newEQlon[i],newEQlat[i],oldEQlon[oldidx],oldEQlat[oldidx],Ga)
         dtmp = dtmp./1000 # m to km
         oldidx2 = oldidx[findall(dtmp.<=distdiff)]
         # check magnitude
@@ -443,7 +439,7 @@ else
                     "_M",oldEQmag[oldidx2[x]]),
                 1:lastindex(oldidx2))
             # get distance to HRV
-            dHRV = Geodesics.surface_distance.(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
+            dHRV = lf.gcdist(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
             dHRV = dHRV/1000 # convert to km from m
             # estimate travel time
             ttime = dHRV/surfvel # seconds
