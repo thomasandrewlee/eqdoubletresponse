@@ -400,7 +400,7 @@ else
     print(string("Threw out ",length(bidx)," events for being too deep. ",length(newEQtme)," events remaining...\n"))
 
     ## THROW OUT DEEP EVENTS
-    bidx = findall(newEQmag.<magmin-magdiff)
+    bidx = findall(newEQmag.<magmin-magdiff)ƒ
     deleteat!(newEQdep,bidx)
     deleteat!(newEQmag,bidx)
     deleteat!(newEQlat,bidx)
@@ -421,6 +421,7 @@ else
     end
     # setup geodesic
     Ga, Gf = Geodesics.EARTH_R_MAJOR_WGS84, Geodesics.F_WGS84
+    mindists = []
     for i in ProgressBar(1:lastindex(newEQtme))
         #print(string("i=",i,"\n")) # error on 861
         # check depths
@@ -428,6 +429,7 @@ else
         # check proximity 
         dtmp = lf.gcdist(newEQlon[i],newEQlat[i],oldEQlon[oldidx],oldEQlat[oldidx],Ga)
         dtmp = dtmp./1000 # m to km
+        push!(mindists,minimum(dtmp))
         oldidx2 = oldidx[findall(dtmp.<=distdiff)]
         # check magnitude
         oldidx3 = oldidx2[findall(newEQmag[i]-magdiff .<= oldEQmag[oldidx2] .<= newEQmag[i]+magdiff)]
