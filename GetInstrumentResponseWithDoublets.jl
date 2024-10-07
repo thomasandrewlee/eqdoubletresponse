@@ -599,7 +599,8 @@ txfrF = []
 if !isdir(string(c_dataout,c_runname,"txfrs/"))
     mkdir(string(c_dataout,c_runname,"txfrs/"))
 end
-for i = 1:lastindex(newEQtme)
+for i in ProgressBar(1:lastindex(newEQtme))
+    print(string("i=",i,"...\n"))
     # check if EQs are on either blist
     if sum(map(x->newEQID[i]==newEQblist[x],1:lastindex(newEQblist))) == 0 # if new ID isn't on the blist
         oldidx = []
