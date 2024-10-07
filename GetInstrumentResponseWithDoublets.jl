@@ -51,6 +51,9 @@ station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
 # EQ save files
 c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
+# blacklists (don't use)
+c_oldEQ_blist = string(c_dataout,"oldblist.txt")
+c_newEQ_blist = string(c_dataout,"newblist.txt")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
@@ -71,6 +74,15 @@ if !isdir(string(c_dataout,c_runname))
     mkdir(string(c_dataout,c_runname))
 end
 
+## LOAD EVENT BLISTS
+oldEQblist = open(c_oldEQ_blist) do f
+    readlines(f)
+end
+newEQblist = open(c_newEQ_blist) do f
+    readlines(f)
+end
+print(string("Read ",length(oldEQblist)," old and ",length(newEQblist)," new events from blists...\n"))
+
 ## OLD EARTHQUAKES
 if isfile(c_oldEQ_save)
     tmpvar = load(c_oldEQ_save)
@@ -83,7 +95,9 @@ if isfile(c_oldEQ_save)
     oldEQtraceT = tmpvar["oldEQtraceT"]
     oldEQspect = tmpvar["oldEQspect"]
     oldEQspectF = tmpvar["oldEQspectF"]
+    oldEQID = tmpvar["oldEQID"]
     tmpvar = []
+    print(string("Loaded ",length(oldEQtme)," old events from ",c_oldEQ_save,"...\n"))
 else # build old EQ events
     ## LOAD ANALOG DATA SAC
     if isfile(c_HRV_save) # read from jld
@@ -400,7 +414,7 @@ else
     print(string("Threw out ",length(bidx)," events for being too deep. ",length(newEQtme)," events remaining...\n"))
 
     ## THROW OUT DEEP EVENTS
-    bidx = findall(newEQmag.<magmin-magdiff)ƒ
+    bidx = findall(newEQmag.<magmin-magdiff)
     deleteat!(newEQdep,bidx)
     deleteat!(newEQmag,bidx)
     deleteat!(newEQlat,bidx)
@@ -438,8 +452,8 @@ else
             # get match info
             matchID = map(x->string(
                     Dates.format(oldEQtme[oldidx3[x]],"yyyymmdd_HHMM"),
-                    "_M",oldEQmag[oldidx2[x]]),
-                1:lastindex(oldidx2))
+                    "_M",oldEQmag[oldidx3[x]]),
+                1:lastindex(oldidx3))
             # get distance to HRV
             dHRV = lf.gcdist(hrv_lon,hrv_lat,newEQlon[i],newEQlat[i],Ga)
             dHRV = dHRV/1000 # convert to km from m
@@ -508,12 +522,12 @@ else
                 # convert to PSD
                 specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
                 # plot and write out waveform and spectras
-                hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="pixels",
+                hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="(m/s)",
                     title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
                         "; M",newEQmag[i],"; (",newEQlat[i],", ",newEQlon[i],", ",newEQdep[i],
                         "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
                 hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
-                    label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
+                    label="raw",xlabel="Period (s)",ylabel="(m/s))^2/Hz",minorgrid=true) 
                 plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
                     # smoothing is roughly a 1Hz window
                 hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
@@ -521,7 +535,7 @@ else
                 ID = string(Dates.format(newEQtme[i],"yyyymmdd_HHMM"),"_M",newEQmag[i])
                 savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
                 push!(newEQtrace,tracetmp)
-                push!(newEQtraceT,tracetmp)
+                push!(newEQtraceT,traceTtmp)
                 push!(newEQspect,specttmpPSD)
                 push!(newEQspectF,specttmpF)
                 push!(newEQmatch,matchID)
@@ -580,3 +594,79 @@ end
 print(string())
 
 ## DO THE COMPARISON FOR EXISTING MATCHES
+txfrD = []
+txfrF = []
+if !isdir(string(c_dataout,c_runname,"txfrs/"))
+    mkdir(string(c_dataout,c_runname,"txfrs/"))
+end
+for i = 1:lastindex(newEQtme)
+    # check if EQs are on either blist
+    if sum(map(x->newEQID[i]==newEQblist[x],1:lastindex(newEQblist))) == 0 # if new ID isn't on the blist
+        oldidx = []
+        for j = 1:lastindex(newEQmatch[i]) #check against the oldblist
+            if sum(map(x->newEQmatch[i][j]==oldEQblist[x],1:lastindex(oldEQblist))) == 0
+                tmpidx = findall(map(x->newEQmatch[i][j]==oldEQID[x],1:lastindex(oldEQID)))
+                append!(oldidx,tmpidx)
+            end
+        end
+        if !isempty(oldidx) # if there is a match
+            for j = 1:lastindex(oldidx)
+                # interpolate onto lowest sampled frequency
+                minF = maximum([minimum(oldEQspectF[oldidx[j]]),minimum(newEQspectF[i])])
+                maxF = minimum([maximum(oldEQspectF[oldidx[j]]),maximum(newEQspectF[i])])
+                oldtxfridx = findall(minF .<= oldEQspectF[oldidx[j]] .<= maxF)
+                newtxfridx = findall(minF .<= newEQspectF[i] .<= maxF)
+                if length(oldtxfridx) <= length(newtxfridx)
+                    txfrFtmp = oldEQspectF[oldidx[j]][oldtxfridx]
+                    oldspect = oldEQspect[oldidx[j]][oldtxfridx]
+                    if sum(txfrFtmp .== newEQspectF[i][newtxfridx])==length(txfrFtmp) # match is exact
+                        newspect = newEQspect[i][newtxfridx]
+                    else # interpolation required
+                        itp = LinearInterpolation(newEQspectF[i],newEQspect[i])
+                        newspect = itp[txfrFtmp]
+                    end
+                else # new has lower sample rate than old      
+                    txfrFtmp = newEQspectF[i][newtxfridx]
+                    newspect = newEQspect[i][newtxfridx]
+                    if sum(txfrFtmp .== oldEQspectF[oldidx[j]][oldtxfridx])==length(txfrFtmp) # match is exact
+                        oldspect = oldEQspect[oldidx[j]][oldtxfridx]
+                    else # interpolation required
+                        itp = LinearInterpolation(oldEQspectF[oldidx[j]],oldEQspect[oldidx[j]])
+                        oldspect = itp[txfrFtmp]
+                    end
+                end
+                # if not then divide the benioff spectra by the modern velocity spectra
+                txfrDtmp = sqrt.(oldspect./newspect)
+                # make plot of both waveforms, both spectras, and txfr
+                hpw = plot(oldEQtraceT[oldidx[j]],oldEQtrace[oldidx[j]],lc=:blue,
+                    label=oldEQID[oldidx[j]],ylabel="pixels",la=0.5,
+                    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+                    y_foreground_color_text=:blue,y_foreground_color_border=:blue,
+                    x_guidefontcolor=:white,x_foreground_color_axis=:white,
+                    x_foreground_color_text=:white,x_foreground_color_border=:white)
+                ax2w = twinx(hpw)
+                plot!(ax2w,Dates.value.(newEQtraceT[i].-newEQtraceT[i][1])/(1000*60),newEQtrace[i],lc=:red,
+                    label=newEQID[i],ylabel="m/s",la=0.5,xlabel="Minutes",legend=:bottomright,
+                    y_guidefontcolor=:red,y_foreground_color_axis=:red,
+                    y_foreground_color_text=:red,y_foreground_color_border=:red,)
+                hps = plot(1 ./txfrFtmp[2:end],oldspect[2:end],xaxis=:log,yaxis=:log,xminorgrid=true,
+                    label=oldEQID[oldidx[j]],lc=:blue,ylabel="(m/s)^2/Hz",xlabel="Period (s)",la=0.5,
+                    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+                    y_foreground_color_text=:blue,y_foreground_color_border=:blue)
+                ax2s = twinx(hps)
+                plot!(ax2s,1 ./txfrFtmp[2:end],newspect[2:end],xaxis=:log,yaxis=:log,
+                    label=newEQID[i],lc=:red,ylabel="pixels^2/Hz",legend=:bottomright,la=:0.5,
+                    y_guidefontcolor=:red,y_foreground_color_axis=:red,
+                    y_foreground_color_text=:red,y_foreground_color_border=:red)
+                hpt = plot(1 ./txfrFtmp[2:end],txfrDtmp[2:end],xaxis=:log,yaxis=:log,
+                    xminorgrid=true,lc=:black,ylabel="pixels / (m/s)",xlabel="Period (s)",label="raw")
+                plot!(hpt,1 ./txfrFtmp[2:end],movmean(txfrDtmp[2:end],50),lc=:red,label="smoothed")
+                hpall = plot(hpw,hps,hpt,layout=grid(3,1),size=(1000,1000))
+                savefig(hpall,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],".pdf"))
+                # save txfr
+                push!(txfrD, txfrDtmp)
+                push!(txfrF, txfrFtmp)
+            end
+        end
+    end
+end
