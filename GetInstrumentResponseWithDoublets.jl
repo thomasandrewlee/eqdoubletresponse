@@ -718,7 +718,7 @@ for i = 1:lastindex(txfrD)
 end
 # get median txfr
 Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
-TXFRD = median(TXFRM,dims=2)
+TXFRD = map(x->median(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
 TXFRD_smth = movmean(TXFRD,Nsmth)
 TXFRD5 = map(x->percentile(filter(!isnan,TXFRM[x,:]),5),1:lastindex(TXFRF))
 TXFRD5_smth = movmean(TXFRD5,Nsmth)
@@ -731,9 +731,13 @@ hpt = plot(1 ./TXFRF[2:end],TXFRM[2:end,:],label="",title=c_runname,
 plot!(hpt,1 ./TXFRF[2:end],TXFRD5_smth[2:end],lc=:gray54,ls=:dash,label="",)  
 plot!(hpt,1 ./TXFRF[2:end],TXFRD95_smth[2:end],lc=:gray54,ls=:dash,label="",)
 plot!(hpt,1 ./TXFRF[2:end],TXFRD[2:end],lc=:black,label="",) 
-plot!(hpt,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)    
+plot!(hpt,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)
+hpt2 = plot(1 ./TXFRF[2:end],TXFRD[2:end,:],label="",title=c_runname,
+    xaxis=:log,yaxis=:log,xminorgrid=true,lc=:black,
+    xlabel="Period (s)",ylabel="pixels / (m/s)")    
 # save data and figures
 savefig(hpt,string(c_dataout,c_runname,"txfr.pdf"))
+savefig(hpt2,string(c_dataout,c_runname,"txfr2.pdf"))
 save(string(c_dataout,c_runname,"txfr.jld"),
     "freq",TXFRF,
     "txfr",TXFRD,
