@@ -38,7 +38,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "TEST6.0/" # make sure to add '/' to get folder
+c_runname = "M6.0_LPZ_BHZ/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -52,8 +52,9 @@ station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
 c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # blacklists (don't use)
-c_oldEQ_blist = string(c_dataout,"oldblist.txt")
-c_newEQ_blist = string(c_dataout,"newblist.txt")
+c_oldEQ_blist = string(c_dataout,"oldblist_LPZ_BHZ.txt")
+c_newEQ_blist = string(c_dataout,"newblist_LPZ_BHZ.txt")
+c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
 # search parameters
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
@@ -68,6 +69,8 @@ windowend = Dates.Minute(45) # window for surface waves
 datathresh = 0.9 # data coverage required in window
 hrv_lat = 42.5060
 hrv_lon = -71.5580
+hrvcha = "BHZ" # channel from HRV to use
+smoothing = 0.01 # Hz
 
 ## SETUP RUNNAME DIR
 if !isdir(string(c_dataout,c_runname))
@@ -75,11 +78,15 @@ if !isdir(string(c_dataout,c_runname))
 end
 
 ## LOAD EVENT BLISTS
-oldEQblist = open(c_oldEQ_blist) do f
-    readlines(f)
+if isfile(c_oldEQ_blist)
+    oldEQblist = open(c_oldEQ_blist) do f
+        readlines(f)
+    end
 end
-newEQblist = open(c_newEQ_blist) do f
-    readlines(f)
+if isfile(c_newEQ_blist)
+    newEQblist = open(c_newEQ_blist) do f
+        readlines(f)
+    end
 end
 print(string("Read ",length(oldEQblist)," old and ",length(newEQblist)," new events from blists...\n"))
 
@@ -299,8 +306,8 @@ else # build old EQ events
                                 "); ",round(dtmp),"km (",round(dtmp/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
                         hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
                             label="raw",xlabel="Period (s)",ylabel="pixels^2/Hz",minorgrid=true) 
-                        plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
-                            # smoothing is roughly a 1Hz window
+                        Nsmth = convert(Int,round(smoothing/mode(diff(specttmpF))))
+                        plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],Nsmth),lc=:red,label="smoothed")
                         hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
                         display(hpall)
                     else
@@ -464,7 +471,7 @@ else
             stime = newEQtme[i] + Dates.Millisecond(ttime) + windowstart
             etime = newEQtme[i] + Dates.Millisecond(ttime) + windowend
             # grab data from iris
-            statmp = get_stations(network="IU", station="HRV", channel="BHZ",
+            statmp = get_stations(network="IU", station="HRV", channel=hrvcha,
                 starttime=Dates.format(stime,"yyyy-mm-ddTHH:MM:SS"), 
                 endtime=Dates.format(etime,"yyyy-mm-ddTHH:MM:SS"))
             if length(statmp)>1 # specify specifically 00 if available
@@ -528,8 +535,8 @@ else
                         "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
                 hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
                     label="raw",xlabel="Period (s)",ylabel="(m/s))^2/Hz",minorgrid=true) 
-                plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],50),lc=:red,label="smoothed")
-                    # smoothing is roughly a 1Hz window
+                Nsmth = convert(Int,round(smoothing/mode(diff(specttmpF))))
+                plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],Nsmth),lc=:red,label="smoothed")
                 hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
                 # save data and plot
                 ID = string(Dates.format(newEQtme[i],"yyyymmdd_HHMM"),"_M",newEQmag[i])
@@ -596,11 +603,12 @@ print(string())
 ## DO THE COMPARISON FOR EXISTING MATCHES
 txfrD = []
 txfrF = []
+txfrID = []
 if !isdir(string(c_dataout,c_runname,"txfrs/"))
     mkdir(string(c_dataout,c_runname,"txfrs/"))
 end
 for i in ProgressBar(1:lastindex(newEQtme))
-    print(string("i=",i,"...\n"))
+    # print(string("i=",i,"...\n"))
     # check if EQs are on either blist
     if sum(map(x->newEQID[i]==newEQblist[x],1:lastindex(newEQblist))) == 0 # if new ID isn't on the blist
         oldidx = []
@@ -617,7 +625,7 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 maxF = minimum([maximum(oldEQspectF[oldidx[j]]),maximum(newEQspectF[i])])
                 oldtxfridx = findall(minF .<= oldEQspectF[oldidx[j]] .<= maxF)
                 newtxfridx = findall(minF .<= newEQspectF[i] .<= maxF)
-                if length(oldtxfridx) <= length(newtxfridx)
+                if length(oldtxfridx) == length(newtxfridx) # same
                     txfrFtmp = oldEQspectF[oldidx[j]][oldtxfridx]
                     oldspect = oldEQspect[oldidx[j]][oldtxfridx]
                     if sum(txfrFtmp .== newEQspectF[i][newtxfridx])==length(txfrFtmp) # match is exact
@@ -626,48 +634,111 @@ for i in ProgressBar(1:lastindex(newEQtme))
                         itp = LinearInterpolation(newEQspectF[i],newEQspect[i])
                         newspect = itp[txfrFtmp]
                     end
+                elseif length(oldtxfridx) < length(newtxfridx) # old has lower sample rate
+                    txfrFtmp = oldEQspectF[oldidx[j]][oldtxfridx]
+                    oldspect = oldEQspect[oldidx[j]][oldtxfridx]
+                    itp = LinearInterpolation(newEQspectF[i],newEQspect[i])
+                    newspect = itp[txfrFtmp]
                 else # new has lower sample rate than old      
                     txfrFtmp = newEQspectF[i][newtxfridx]
                     newspect = newEQspect[i][newtxfridx]
-                    if sum(txfrFtmp .== oldEQspectF[oldidx[j]][oldtxfridx])==length(txfrFtmp) # match is exact
-                        oldspect = oldEQspect[oldidx[j]][oldtxfridx]
-                    else # interpolation required
-                        itp = LinearInterpolation(oldEQspectF[oldidx[j]],oldEQspect[oldidx[j]])
-                        oldspect = itp[txfrFtmp]
-                    end
+                    itp = LinearInterpolation(oldEQspectF[oldidx[j]],oldEQspect[oldidx[j]])
+                    oldspect = itp[txfrFtmp]
                 end
                 # if not then divide the benioff spectra by the modern velocity spectra
                 txfrDtmp = sqrt.(oldspect./newspect)
                 # make plot of both waveforms, both spectras, and txfr
-                hpw = plot(oldEQtraceT[oldidx[j]],oldEQtrace[oldidx[j]],lc=:blue,
-                    label=oldEQID[oldidx[j]],ylabel="pixels",la=0.5,
+                hpw = plot(Dates.value.(oldEQtraceT[oldidx[j]].-oldEQtraceT[oldidx[j]][1])/(1000*60),
+                    oldEQtrace[oldidx[j]],lc=:blue,
+                    label=oldEQID[oldidx[j]],ylabel="pixels",la=0.5,xlabel="Minutes",
                     y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
-                    y_foreground_color_text=:blue,y_foreground_color_border=:blue,
-                    x_guidefontcolor=:white,x_foreground_color_axis=:white,
-                    x_foreground_color_text=:white,x_foreground_color_border=:white)
+                    y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+                    # x_guidefontcolor=:white,x_foreground_color_axis=:white,
+                    # x_foreground_color_text=:white,x_foreground_color_border=:white)
                 ax2w = twinx(hpw)
                 plot!(ax2w,Dates.value.(newEQtraceT[i].-newEQtraceT[i][1])/(1000*60),newEQtrace[i],lc=:red,
-                    label=newEQID[i],ylabel="m/s",la=0.5,xlabel="Minutes",legend=:bottomright,
+                    label=newEQID[i],ylabel="m/s",la=0.5,legend=:bottomright,
                     y_guidefontcolor=:red,y_foreground_color_axis=:red,
                     y_foreground_color_text=:red,y_foreground_color_border=:red,)
                 hps = plot(1 ./txfrFtmp[2:end],oldspect[2:end],xaxis=:log,yaxis=:log,xminorgrid=true,
-                    label=oldEQID[oldidx[j]],lc=:blue,ylabel="(m/s)^2/Hz",xlabel="Period (s)",la=0.5,
+                    label=oldEQID[oldidx[j]],lc=:blue,ylabel="pixels^2/Hz",xlabel="Period (s)",la=0.5,
                     y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
                     y_foreground_color_text=:blue,y_foreground_color_border=:blue)
                 ax2s = twinx(hps)
                 plot!(ax2s,1 ./txfrFtmp[2:end],newspect[2:end],xaxis=:log,yaxis=:log,
-                    label=newEQID[i],lc=:red,ylabel="pixels^2/Hz",legend=:bottomright,la=:0.5,
+                    label=newEQID[i],lc=:red,ylabel="(m/s)^2/Hz",legend=:bottomright,la=:0.5,
                     y_guidefontcolor=:red,y_foreground_color_axis=:red,
                     y_foreground_color_text=:red,y_foreground_color_border=:red)
                 hpt = plot(1 ./txfrFtmp[2:end],txfrDtmp[2:end],xaxis=:log,yaxis=:log,
                     xminorgrid=true,lc=:black,ylabel="pixels / (m/s)",xlabel="Period (s)",label="raw")
-                plot!(hpt,1 ./txfrFtmp[2:end],movmean(txfrDtmp[2:end],50),lc=:red,label="smoothed")
+                Nsmth = convert(Int,round(smoothing/mode(diff(txfrFtmp))))
+                plot!(hpt,1 ./txfrFtmp[2:end],movmean(txfrDtmp[2:end],Nsmth),lc=:red,label="smoothed")
                 hpall = plot(hpw,hps,hpt,layout=grid(3,1),size=(1000,1000))
                 savefig(hpall,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],".pdf"))
                 # save txfr
                 push!(txfrD, txfrDtmp)
                 push!(txfrF, txfrFtmp)
+                push!(txfrID, string(oldEQID[oldidx[j]],"_",newEQID[i]))
             end
         end
     end
 end
+
+# get bad matches
+if isfile(c_txfr_blist)
+    txfrblist = open(c_txfr_blist) do f
+        readlines(f)
+    end
+end
+print(string("Read ",length(txfrblist)," matches to ignore from blist...\n"))
+## AVERAGE TXFR FUNCS
+# get most common freq vector
+TXFRF = mode(txfrF)
+TXFRM = fill!(Array{Float64,2}(undef,(length(TXFRF),length(txfrD))),NaN)
+for i = 1:lastindex(txfrD)
+    # check against blist
+    if sum(map(x->txfrID[i]==txfrblist[x],1:lastindex(txfrblist))) == 0
+        # check if interpolation is needed
+        if length(TXFRF) == length(txfrF[i]) # same
+            if sum(txfrF[i] .== TXFRF)==length(txfrF[i]) # match is exact
+                TXFRM[:,i] = txfrD[i] 
+            else # interpolation required
+                gidx = findall(TXFRF[1] .<= txfrF[i] .<= TXFRF[end])
+                gidx2 = map(x->argmin(abs.(txfrF[i][gidx[x]].-TXFRF)),1:lastindex(gidx))
+                itp = LinearInterpolation(txfrF[i],txfrD[i])
+                TXFRM[gidx2,i] = itp(TXFRF[gidx2])
+            end
+        else # new has lower sample rate than old      
+            gidx = findall(TXFRF[1] .<= txfrF[i] .<= TXFRF[end])
+            gidx2 = map(x->argmin(abs.(txfrF[i][gidx[x]].-TXFRF)),1:lastindex(gidx))
+            itp = LinearInterpolation(txfrF[i],txfrD[i])
+            TXFRM[gidx2,i] = itp(TXFRF[gidx2])
+        end
+    end
+end
+# get median txfr
+Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
+TXFRD = median(TXFRM,dims=2)
+TXFRD_smth = movmean(TXFRD,Nsmth)
+TXFRD5 = map(x->percentile(filter(!isnan,TXFRM[x,:]),5),1:lastindex(TXFRF))
+TXFRD5_smth = movmean(TXFRD5,Nsmth)
+TXFRD95 = map(x->percentile(filter(!isnan,TXFRM[x,:]),95),1:lastindex(TXFRF))
+TXFRD95_smth = movmean(TXFRD95,Nsmth)
+# plot transfers
+hpt = plot(1 ./TXFRF[2:end],TXFRM[2:end,:],label="",title=c_runname,
+    xaxis=:log,yaxis=:log,xminorgrid=true,la=0.02,
+    xlabel="Period (s)",ylabel="pixels / (m/s)")
+plot!(hpt,1 ./TXFRF[2:end],TXFRD5_smth[2:end],lc=:gray54,ls=:dash,label="",)  
+plot!(hpt,1 ./TXFRF[2:end],TXFRD95_smth[2:end],lc=:gray54,ls=:dash,label="",)
+plot!(hpt,1 ./TXFRF[2:end],TXFRD[2:end],lc=:black,label="",) 
+plot!(hpt,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)    
+# save data and figures
+savefig(hpt,string(c_dataout,c_runname,"txfr.pdf"))
+save(string(c_dataout,c_runname,"txfr.jld"),
+    "freq",TXFRF,
+    "txfr",TXFRD,
+    "txfr5",TXFRD5,
+    "txfr95",TXFRD95,
+)
+
+
