@@ -39,7 +39,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M6.0_LPZ_BHZ_2/" # make sure to add '/' to get folder
+c_runname = "M6.0_LPZ_BHZ_ampscl/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -60,8 +60,9 @@ c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
 # search parameters
-differentiateold = true # treat old data as displacement to get velocity
-usePeriodogram = true
+differentiateold = false # treat old data as displacement to get velocity
+usePeriodogram = true # use DSP.periodogram instead of FFTW
+weightAmpByMag = true # weight the amplitudes by magnitude (scaled by energy)
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
 distdiff = 50 # allowable distance difference (km)
@@ -140,12 +141,12 @@ else # build old EQ events
             push!(traces,trace(Sold))
         end
         # initialize new data and time vectors
-        samprate = unique(map(x->unique(diff(times[x])),1:lastindex(times)))
+        oldsamprate = unique(map(x->unique(diff(times[x])),1:lastindex(times)))
         if length(samprate)==1
-            samprate = samprate[1][1]
+            oldsamprate = samprate[1][1]
         else
-            samprate = mode(samprate)
-            samprate = samprate[1]
+            oldsamprate = mode(samprate)
+            oldsamprate = samprate[1]
             print("WARNING!!! sample rates are not the same!! using mode! \n")
         end
         minT = minimum(minimum.(times))
@@ -167,7 +168,12 @@ else # build old EQ events
             oldD[idxtmp] .= d1
         end
         # save the data as jld
-        save(c_HRV_save,"T",oldT,"D",oldD,"targetsamplerate",samprate)
+        save(c_HRV_save,"T",oldT,"D",oldD,"targetsamplerate",oldsamprate)
+    end
+    # differentiate if specified
+    if differentiateold
+        oldT = oldT[1:end-1] .+ (oldsamprate/2)
+        oldD = diff(oldD)
     end
 
     ## LOAD ISC CATALOG FOR ANALOG
@@ -243,6 +249,9 @@ else # build old EQ events
             # subtract non-paramteric trend
             tracetmp = oldD[targidx]
             tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(targidx)/10)))
+            # get rid of NaN
+            noNaNtrace = oldD[targidx]
+            noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
             # calculate fft / psd
             if usePeriodogram
                 # use DSP
@@ -252,8 +261,6 @@ else # build old EQ events
                 specttmpPSD = DSP.Periodograms.power(ptmp)
             else
                 # use FFTW
-                noNaNtrace = oldD[targidx]
-                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
                 specttmpD = FFTW.rfft(noNaNtrace)
                 specttmpF = FFTW.rfftfreq(length(targidx),1/(Dates.value(oldsamprate)/1000))
                 # convert to PSD
@@ -536,6 +543,9 @@ else
                 end
                 # subtract non-paramteric trend
                 tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
+                # get rid of NaNs
+                noNaNtrace = deepcopy(tracetmp)
+                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
                 # calculate fft
                 if usePeriodogram
                     # use DSP
@@ -545,8 +555,6 @@ else
                     specttmpPSD = DSP.Periodograms.power(ptmp)
                 else
                     # use FFTW
-                    noNaNtrace = deepcopy(tracetmp)
-                    noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
                     specttmpD = FFTW.rfft(noNaNtrace)
                     specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
                     # convert to PSD
@@ -625,6 +633,7 @@ end
 print(string())
 
 ## DO THE COMPARISON FOR EXISTING MATCHES EMPIRICALLY
+print("Finding matches and comparing...\n")
 txfrD = []
 txfrF = []
 txfrID = []
@@ -671,6 +680,13 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 end
                 # if not then divide the benioff spectra by the modern velocity spectra
                 txfrDtmp = sqrt.(oldspect./newspect)
+                # get scaling factor we should use (effectively taking out magnitude dependence)
+                if weightAmpByMag
+                    newAmpScl = 10^newEQmag[i]
+                    oldAmpScl = 10^oldEQmag[oldidx[j]]
+                    sclfact = newAmpScl / oldAmpScl
+                    txfrDtmp = sclfact.*txfrDtmp
+                end
                 # make plot of both waveforms, both spectras, and txfr
                 hpw = plot(Dates.value.(oldEQtraceT[oldidx[j]].-oldEQtraceT[oldidx[j]][1])/(1000*60),
                     oldEQtrace[oldidx[j]],lc=:blue,
@@ -716,6 +732,7 @@ if isfile(c_txfr_blist)
 end
 print(string("Read ",length(txfrblist)," matches to ignore from blist...\n"))
 ## AVERAGE TXFR FUNCS
+print("Averaging transfer functions...\n")
 # get most common freq vector
 TXFRF = mode(txfrF)
 TXFRM = fill!(Array{Float64,2}(undef,(length(TXFRF),length(txfrD))),NaN)
@@ -799,4 +816,8 @@ hptvelog20 = deepcopy(hptve20)
 plot!(hptvelog20,xaxis=:log)
 # aggregate
 hptveall = plot(hptve,hptve20,hptvelog,hptvelog20,layout=grid(2,2),size=(1400,1000))
-savefig(hptveall,string(c_dataout,"theoretical_v_empirical.pdf"))
+savefig(hptveall,string(c_dataout,c_runname,"theoretical_v_empirical.pdf"))
+
+
+# finish
+print("Done!\n")
