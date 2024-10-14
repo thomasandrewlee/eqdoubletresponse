@@ -28,6 +28,7 @@ using Geodesics
 using Plots
 using JLD
 using FFTW
+using DSP
 using StatsBase
 using Dates
 using Interpolations
@@ -38,13 +39,13 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M6.0_LPZ_BHZ/" # make sure to add '/' to get folder
+c_runname = "M6.0_LPZ_BHZ_2/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
 # HRV data files
 c_HRV_old = string(usr_str,"Downloads/HRV_SAC_ANALOG/LPZ/")
-c_HRV_save = string(c_dataout,"HRV_1936_1940_LPZ.jld")
+c_HRV_save = string(usr_str,"Downloads/1936_40_HRV_TIMESERIES/1936_40_HRV_LPZ.jld")
 # HRV manual gain correction
 station_gains_file = [] # use this empty to avoid correcting gains
 station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
@@ -55,7 +56,11 @@ c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 c_oldEQ_blist = string(c_dataout,"oldblist_LPZ_BHZ.txt")
 c_newEQ_blist = string(c_dataout,"newblist_LPZ_BHZ.txt")
 c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
+# theoretical transfer function
+T0 = 1 # seismometer period (seconds)
+Tg = 14 # galvanometer period (seconds)
 # search parameters
+usePeriodogram = true
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
 distdiff = 50 # allowable distance difference (km)
@@ -237,13 +242,22 @@ else # build old EQ events
             # subtract non-paramteric trend
             tracetmp = oldD[targidx]
             tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(targidx)/10)))
-            # calculate fft
-            noNaNtrace = oldD[targidx]
-            noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
-            specttmpD = FFTW.rfft(noNaNtrace)
-            specttmpF = FFTW.rfftfreq(length(targidx),1/(Dates.value(oldsamprate)/1000))
-            # convert to PSD
-            specttmpPSD = 2*(1/((Dates.value(oldsamprate)/1000)*length(targidx))).*(abs.(specttmpD).^2)
+            # calculate fft / psd
+            if usePeriodogram
+                # use DSP
+                dt = Dates.value(oldsamprate)/1000
+                ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
+                specttmpF = DSP.Periodograms.freq(ptmp)
+                specttmpPSD = DSP.Periodograms.power(ptmp)
+            else
+                # use FFTW
+                noNaNtrace = oldD[targidx]
+                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
+                specttmpD = FFTW.rfft(noNaNtrace)
+                specttmpF = FFTW.rfftfreq(length(targidx),1/(Dates.value(oldsamprate)/1000))
+                # convert to PSD
+                specttmpPSD = 2*(1/((Dates.value(oldsamprate)/1000)*length(targidx))).*(abs.(specttmpD).^2)
+            end
             # plot and write out waveform and spectras
             hpw = plot(oldT[targidx],tracetmp,lc=:black,legend=false,ylabel="pixels",
                 title=string(Dates.format(oldEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
@@ -522,12 +536,21 @@ else
                 # subtract non-paramteric trend
                 tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
                 # calculate fft
-                noNaNtrace = deepcopy(tracetmp)
-                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
-                specttmpD = FFTW.rfft(noNaNtrace)
-                specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
-                # convert to PSD
-                specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
+                if usePeriodogram
+                    # use DSP
+                    dt = Dates.value(samprate)/1000
+                    ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
+                    specttmpF = DSP.Periodograms.freq(ptmp)
+                    specttmpPSD = DSP.Periodograms.power(ptmp)
+                else
+                    # use FFTW
+                    noNaNtrace = deepcopy(tracetmp)
+                    noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
+                    specttmpD = FFTW.rfft(noNaNtrace)
+                    specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
+                    # convert to PSD
+                    specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
+                end
                 # plot and write out waveform and spectras
                 hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="(m/s)",
                     title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
@@ -600,7 +623,7 @@ else
 end
 print(string())
 
-## DO THE COMPARISON FOR EXISTING MATCHES
+## DO THE COMPARISON FOR EXISTING MATCHES EMPIRICALLY
 txfrD = []
 txfrF = []
 txfrID = []
@@ -745,4 +768,34 @@ save(string(c_dataout,c_runname,"txfr.jld"),
     "txfr95",TXFRD95,
 )
 
-
+## DO THE THEORETICAL TRANSFER FUNCTION
+Trange = 1:0.01:100 # seconds
+Frange = 1 ./Trange
+w = 2*pi./Trange
+w0 = 2*pi/T0
+wg = 2*pi/Tg
+Q = (w.^2)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2))
+# plot empirical transfer function and theoretical one
+fidx = findall(minimum(Frange).<=TXFRF.<=maximum(Frange))
+hptve = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirical 1-100s",
+    xminorgrid=true,lc=:black,xlabel="Period (s)",ylabel="pixels / (m/s)") 
+ax2tve = twinx(hptve)
+plot!(ax2tve,Trange,Q,lc=:blue,lw=1.5,label="Theoretical",
+    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+    y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+hptvelog = deepcopy(hptve)
+plot!(hptvelog,xaxis=:log)
+# 20 second version
+fidx = findall((1/20).<=TXFRF.<=maximum(Frange))
+hptve20 = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirical 1-20s",
+    xminorgrid=true,lc=:black,xlabel="Period (s)",ylabel="pixels / (m/s)") 
+ax2tve20 = twinx(hptve20)
+fidx2 = findall(Trange.<=20)
+plot!(ax2tve20,Trange[fidx2],Q[fidx2],lc=:blue,lw=1.5,label="Theoretical",
+    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+    y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+hptvelog20 = deepcopy(hptve20)
+plot!(hptvelog20,xaxis=:log)
+# aggregate
+hptveall = plot(hptve,hptve20,hptvelog,hptvelog20,layout=grid(2,2),size=(1400,1000))
+savefig(hptveall,string(c_dataout,"theoretical_v_empirical.pdf"))
