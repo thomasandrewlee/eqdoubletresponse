@@ -45,7 +45,7 @@ c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
 # HRV data files
 c_HRV_old = string(usr_str,"Downloads/HRV_SAC_ANALOG/LPZ/")
-c_HRV_save = string(usr_str,"Downloads/1936_40_HRV_TIMESERIES/1936_40_HRV_LPZ.jld")
+c_HRV_save = string(usr_str,"Downloads/1936_40_HRV_TIMESERIES/1936_40_HRV_LPZ_TIMESERIES.jld")
 # HRV manual gain correction
 station_gains_file = [] # use this empty to avoid correcting gains
 station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
@@ -60,6 +60,7 @@ c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
 # search parameters
+differentiateold = true # treat old data as displacement to get velocity
 usePeriodogram = true
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
@@ -115,9 +116,9 @@ else # build old EQ events
     if isfile(c_HRV_save) # read from jld
         # load 
         tmpvar = load(c_HRV_save)
-        oldT = tmpvar["oldT"]
-        oldD = tmpvar["oldD"]
-        oldsamprate = tmpvar["oldsamprate"]
+        oldT = tmpvar["T"]
+        oldD = tmpvar["D"]
+        oldsamprate = tmpvar["targetsamplerate"]
         tmpvar = []
     else # read from sac
         # find folders starting with digitseis
@@ -166,7 +167,7 @@ else # build old EQ events
             oldD[idxtmp] .= d1
         end
         # save the data as jld
-        save(c_HRV_save,"oldT",oldT,"oldD",oldD,"oldsamprate",samprate)
+        save(c_HRV_save,"T",oldT,"D",oldD,"targetsamplerate",samprate)
     end
 
     ## LOAD ISC CATALOG FOR ANALOG
