@@ -263,12 +263,12 @@ else # build old EQ events
                     wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
                     # initialize periodogram struct
                     dt = Dates.value(oldsamprate)/1000
-                    ptmp = DSP.Periodograms.periodogram(rand(length(noNaNtrace)); fs = 1/dt)
+                    ptmp = DSP.Periodograms.periodogram(rand(intlen+1); fs = 1/dt)
                     specttmpF = DSP.Periodograms.freq(ptmp)
                     psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
                     # use DSP with 10 minute windows
                     for j = 1:lastindex(wndwstrt)
-                        ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt:wndwstrt+intlen]; fs = 1/dt)
+                        ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt[j]:wndwstrt[j]+intlen]; fs = 1/dt)
                         psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
                     end
                     # average spectra
@@ -577,12 +577,12 @@ else
                         wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
                         # initialize periodogram struct
                         dt = Dates.value(samprate)/1000
-                        ptmp = DSP.Periodograms.periodogram(rand(length(noNaNtrace)); fs = 1/dt)
+                        ptmp = DSP.Periodograms.periodogram(rand(intlen+1); fs = 1/dt)
                         specttmpF = DSP.Periodograms.freq(ptmp)
                         psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
                         # use DSP with 10 minute windows
                         for j = 1:lastindex(wndwstrt)
-                            ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt:wndwstrt+intlen]; fs = 1/dt)
+                            ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt[j]:wndwstrt[j]+intlen]; fs = 1/dt)
                             psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
                         end
                         # average spectra
