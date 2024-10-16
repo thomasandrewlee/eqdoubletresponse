@@ -39,7 +39,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M6.0_LPZ_BHZ_ampscl/" # make sure to add '/' to get folder
+c_runname = "M6.0_LPZ_BHZ_ampscl_stack10/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
@@ -62,6 +62,7 @@ Tg = 14 # galvanometer period (seconds)
 # search parameters
 differentiateold = false # treat old data as displacement to get velocity
 usePeriodogram = true # use DSP.periodogram instead of FFTW
+stack10 = true # if using periodogram, this is the option to stack 10 minute spectra to match the other processing
 weightAmpByMag = true # weight the amplitudes by magnitude (scaled by energy)
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
@@ -254,11 +255,31 @@ else # build old EQ events
             noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
             # calculate fft / psd
             if usePeriodogram
-                # use DSP
-                dt = Dates.value(oldsamprate)/1000
-                ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
-                specttmpF = DSP.Periodograms.freq(ptmp)
-                specttmpPSD = DSP.Periodograms.power(ptmp)
+                if stack10
+                    # get integer index window size and step
+                    intstep = convert(Int,round(Dates.Minute(1)/oldsamprate))
+                    intlen = convert(Int,round(Dates.Minute(10)/oldsamprate))
+                    # get 10 minute windows
+                    wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
+                    # initialize periodogram struct
+                    dt = Dates.value(oldsamprate)/1000
+                    ptmp = DSP.Periodograms.periodogram(rand(length(noNaNtrace)); fs = 1/dt)
+                    specttmpF = DSP.Periodograms.freq(ptmp)
+                    psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
+                    # use DSP with 10 minute windows
+                    for j = 1:lastindex(wndwstrt)
+                        ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt:wndwstrt+intlen]; fs = 1/dt)
+                        psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
+                    end
+                    # average spectra
+                    specttmpPSD = vec(mean(psdmatrix,dims=2))
+                else
+                    # use DSP
+                    dt = Dates.value(oldsamprate)/1000
+                    ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
+                    specttmpF = DSP.Periodograms.freq(ptmp)
+                    specttmpPSD = DSP.Periodograms.power(ptmp)
+                end
             else
                 # use FFTW
                 specttmpD = FFTW.rfft(noNaNtrace)
@@ -548,11 +569,31 @@ else
                 noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
                 # calculate fft
                 if usePeriodogram
-                    # use DSP
-                    dt = Dates.value(samprate)/1000
-                    ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
-                    specttmpF = DSP.Periodograms.freq(ptmp)
-                    specttmpPSD = DSP.Periodograms.power(ptmp)
+                    if stack10
+                        # get integer index window size and step
+                        intstep = convert(Int,round(Dates.Minute(1)/samprate))
+                        intlen = convert(Int,round(Dates.Minute(10)/samprate))
+                        # get 10 minute windows
+                        wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
+                        # initialize periodogram struct
+                        dt = Dates.value(samprate)/1000
+                        ptmp = DSP.Periodograms.periodogram(rand(length(noNaNtrace)); fs = 1/dt)
+                        specttmpF = DSP.Periodograms.freq(ptmp)
+                        psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
+                        # use DSP with 10 minute windows
+                        for j = 1:lastindex(wndwstrt)
+                            ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt:wndwstrt+intlen]; fs = 1/dt)
+                            psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
+                        end
+                        # average spectra
+                        specttmpPSD = vec(mean(psdmatrix,dims=2))
+                    else
+                        # use DSP
+                        dt = Dates.value(samprate)/1000
+                        ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
+                        specttmpF = DSP.Periodograms.freq(ptmp)
+                        specttmpPSD = DSP.Periodograms.power(ptmp)
+                    end
                 else
                     # use FFTW
                     specttmpD = FFTW.rfft(noNaNtrace)
