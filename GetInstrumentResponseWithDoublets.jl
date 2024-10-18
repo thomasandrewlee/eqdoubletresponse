@@ -64,6 +64,7 @@ differentiateold = false # treat old data as displacement to get velocity
 usePeriodogram = true # use DSP.periodogram instead of FFTW
 stack10 = true # if using periodogram, this is the option to stack 10 minute spectra to match the other processing
 weightAmpByMag = true # weight the amplitudes by magnitude (scaled by energy)
+weightFreqByAmp = true # weight the contribution of a txfr at a given frequency by the amplitude at that freq
 deplim = 50 # deepest limit for depth (km)
 magmin = 6.0 # smallest allowable mag
 distdiff = 50 # allowable distance difference (km)
@@ -676,6 +677,7 @@ print(string())
 ## DO THE COMPARISON FOR EXISTING MATCHES EMPIRICALLY
 print("Finding matches and comparing...\n")
 txfrD = []
+txfrDwght = []
 txfrF = []
 txfrID = []
 if !isdir(string(c_dataout,c_runname,"txfrs/"))
@@ -721,6 +723,10 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 end
                 # if not then divide the benioff spectra by the modern velocity spectra
                 txfrDtmp = sqrt.(oldspect./newspect)
+                # get weighting functions
+                scloldspect = lf.unitnorm(oldspect)
+                sclnewspect = lf.unitnorm(newspect)
+                txfrDwghttmp = (scloldspect .+ sclnewspect)./2
                 # get scaling factor we should use (effectively taking out magnitude dependence)
                 if weightAmpByMag
                     newAmpScl = 10^newEQmag[i]
@@ -758,6 +764,7 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 savefig(hpall,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],".pdf"))
                 # save txfr
                 push!(txfrD, txfrDtmp)
+                push!(txfrD, txfrDtmp)
                 push!(txfrF, txfrFtmp)
                 push!(txfrID, string(oldEQID[oldidx[j]],"_",newEQID[i]))
             end
@@ -777,35 +784,42 @@ print("Averaging transfer functions...\n")
 # get most common freq vector
 TXFRF = mode(txfrF)
 TXFRM = fill!(Array{Float64,2}(undef,(length(TXFRF),length(txfrD))),NaN)
+TXFRMwght = fill!(Array{Float64,2}(undef,(length(TXFRF),length(txfrD))),NaN)
 for i = 1:lastindex(txfrD)
     # check against blist
     if sum(map(x->txfrID[i]==txfrblist[x],1:lastindex(txfrblist))) == 0
         # check if interpolation is needed
+        global doInterpolation = true
         if length(TXFRF) == length(txfrF[i]) # same
             if sum(txfrF[i] .== TXFRF)==length(txfrF[i]) # match is exact
                 TXFRM[:,i] = txfrD[i] 
-            else # interpolation required
-                gidx = findall(TXFRF[1] .<= txfrF[i] .<= TXFRF[end])
-                gidx2 = map(x->argmin(abs.(txfrF[i][gidx[x]].-TXFRF)),1:lastindex(gidx))
-                itp = LinearInterpolation(txfrF[i],txfrD[i])
-                TXFRM[gidx2,i] = itp(TXFRF[gidx2])
+                TXFRMwght[:,i] = txfrDwght[i]
+                global doInterpolation = false
             end
-        else # new has lower sample rate than old      
+        end
+        if doInteprolation # inteprolation required    
             gidx = findall(TXFRF[1] .<= txfrF[i] .<= TXFRF[end])
             gidx2 = map(x->argmin(abs.(txfrF[i][gidx[x]].-TXFRF)),1:lastindex(gidx))
             itp = LinearInterpolation(txfrF[i],txfrD[i])
+            itpwght = LinearInterpolation(txfr[i],txfrDwght[i])
             TXFRM[gidx2,i] = itp(TXFRF[gidx2])
+            TXFRMwght[gidx2,i] = itp(TXFRF[gidx2])
         end
     end
 end
 # get median txfr
-Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
-TXFRD = map(x->median(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
-TXFRD_smth = movmean(TXFRD,Nsmth)
-TXFRD5 = map(x->percentile(filter(!isnan,TXFRM[x,:]),5),1:lastindex(TXFRF))
-TXFRD5_smth = movmean(TXFRD5,Nsmth)
-TXFRD95 = map(x->percentile(filter(!isnan,TXFRM[x,:]),95),1:lastindex(TXFRF))
-TXFRD95_smth = movmean(TXFRD95,Nsmth)
+if weightFreqByAmp
+    # perform weighted mean and percentiles
+
+else
+    Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
+    TXFRD = map(x->median(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
+    TXFRD_smth = movmean(TXFRD,Nsmth)
+    TXFRD5 = map(x->percentile(filter(!isnan,TXFRM[x,:]),5),1:lastindex(TXFRF))
+    TXFRD5_smth = movmean(TXFRD5,Nsmth)
+    TXFRD95 = map(x->percentile(filter(!isnan,TXFRM[x,:]),95),1:lastindex(TXFRF))
+    TXFRD95_smth = movmean(TXFRD95,Nsmth)
+end
 # plot transfers
 hpt = plot(1 ./TXFRF[2:end],TXFRM[2:end,:],label="",title=c_runname,
     xaxis=:log,yaxis=:log,xminorgrid=true,la=0.02,
