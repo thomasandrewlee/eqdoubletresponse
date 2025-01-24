@@ -39,10 +39,10 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M6.0_LPZ_BHZ_ampscl_stack10/" # make sure to add '/' to get folder
+c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_noblist_logfrqwght/" # make sure to add '/' to get folder
 # ISC data files
-c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1936_1941.txt")
-c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M6_1988_2024.txt")
+c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1935_1941.txt")
+c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1988_2024.txt")
 # HRV data files
 c_HRV_old = string(usr_str,"Downloads/HRV_SAC_ANALOG/LPZ/")
 c_HRV_save = string(usr_str,"Downloads/1936_40_HRV_TIMESERIES/1936_40_HRV_LPZ_TIMESERIES.jld")
@@ -53,6 +53,7 @@ station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
 c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # blacklists (don't use)
+ignoreblist = true # go without filter
 c_oldEQ_blist = string(c_dataout,"oldblist_LPZ_BHZ.txt")
 c_newEQ_blist = string(c_dataout,"newblist_LPZ_BHZ.txt")
 c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
@@ -65,11 +66,12 @@ usePeriodogram = true # use DSP.periodogram instead of FFTW
 stack10 = true # if using periodogram, this is the option to stack 10 minute spectra to match the other processing
 weightAmpByMag = true # weight the amplitudes by magnitude (scaled by energy)
 weightFreqByAmp = true # weight the contribution of a txfr at a given frequency by the amplitude at that freq
+logweights = true # log weights for weighting the frequency median by relative amplitude
 deplim = 50 # deepest limit for depth (km)
-magmin = 6.0 # smallest allowable mag
+magmin = 5.5 # smallest allowable mag
 distdiff = 50 # allowable distance difference (km)
 depdiff = 25 # allowable depth difference (km)
-magdiff = 0.2
+magdiff = 0.3
 surfvel = 3.33 # surface wave velocity km/s
 oldEQmanualcheck = false # run GUI to check waveforms
 oldEQignore = [] # matchID strings to ignore
@@ -87,17 +89,22 @@ if !isdir(string(c_dataout,c_runname))
 end
 
 ## LOAD EVENT BLISTS
-if isfile(c_oldEQ_blist)
-    oldEQblist = open(c_oldEQ_blist) do f
-        readlines(f)
+if !ignoreblist
+    if isfile(c_oldEQ_blist)
+        oldEQblist = open(c_oldEQ_blist) do f
+            readlines(f)
+        end
     end
-end
-if isfile(c_newEQ_blist)
-    newEQblist = open(c_newEQ_blist) do f
-        readlines(f)
+    if isfile(c_newEQ_blist)
+        newEQblist = open(c_newEQ_blist) do f
+            readlines(f)
+        end
     end
+    print(string("Read ",length(oldEQblist)," old and ",length(newEQblist)," new events from blists...\n"))
+else
+    oldEQblist = ["cat"]
+    newEQblist = ["cat"]
 end
-print(string("Read ",length(oldEQblist)," old and ",length(newEQblist)," new events from blists...\n"))
 
 ## OLD EARTHQUAKES
 if isfile(c_oldEQ_save)
@@ -437,7 +444,7 @@ else
     newEQdep = []
     newEQmag = []
     for il = 30:lastindex(ln) # skip header line
-        #print(string(il,"\n"))
+        print(string(il,"\n"))
         if length(ln[il])>97
             commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
             # try read with subseconds
@@ -499,7 +506,7 @@ else
         # check magnitude
         oldidx3 = oldidx2[findall(newEQmag[i]-magdiff .<= oldEQmag[oldidx2] .<= newEQmag[i]+magdiff)]
         if !isempty(oldidx3)
-            # print(string("i=",i,"\n"))
+            print(string("i=",i,"\n"))
             # get match info
             matchID = map(x->string(
                     Dates.format(oldEQtme[oldidx3[x]],"yyyymmdd_HHMM"),
@@ -523,105 +530,115 @@ else
                     starttime=Dates.format(stime,"yyyy-mm-ddTHH:MM:SS"), 
                     endtime=Dates.format(etime,"yyyy-mm-ddTHH:MM:SS"))
             end
+            if !isempty(statmp)
             Stmp = get_data(statmp,stime,etime)
-            if !isempty(Stmp)
-                # get trace data and delta out
-                traceTtmp = lf.gettime(Stmp[1])
-                tracetmp = trace(Stmp[1])
-                # initialize new data and time vectors
-                samprate = unique(diff(traceTtmp))
-                if length(samprate)==1
-                    samprate = samprate[1]
-                else
-                    samprate = mode(samprate)
-                    print("WARNING!!! sample rates are not the same!! using mode! \n")
-                end
-                # read gain (assuming flat response, not a bad one for BB HRV)
-                if !isempty(station_gains_file)
-                    global gain_stime = [] # start of time periods
-                    global gain_etime = [] # end of time periods
-                    global gain = [] # gain for that time period (counts / (m/s))
-                    if isempty(gain)# if gains file hasn't been read yet
-                        # read in the gain file
-                        ln = open(station_gains_file) do f
-                            readlines(f)
-                        end
-                        for il = 3:lastindex(ln) # skip header line
-                            commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
-                            push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
-                            push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
-                            push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
-                        end 
-                    end
-                    # find right gain and correct 
-                    traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
-                    for j = 1:lastindex(gain)
-                        tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
-                        if !isempty(tidx)
-                            traceGtmp[tidx] .= gain[j] 
-                        end
-                    end
-                    tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
-                end
-                # subtract non-paramteric trend
-                tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
-                # get rid of NaNs
-                noNaNtrace = deepcopy(tracetmp)
-                noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
-                # calculate fft
-                if usePeriodogram
-                    if stack10
-                        # get integer index window size and step
-                        intstep = convert(Int,round(Dates.Minute(1)/samprate))
-                        intlen = convert(Int,round(Dates.Minute(10)/samprate))
-                        # get 10 minute windows
-                        wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
-                        # initialize periodogram struct
-                        dt = Dates.value(samprate)/1000
-                        ptmp = DSP.Periodograms.periodogram(rand(intlen+1); fs = 1/dt)
-                        specttmpF = DSP.Periodograms.freq(ptmp)
-                        psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
-                        # use DSP with 10 minute windows
-                        for j = 1:lastindex(wndwstrt)
-                            ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt[j]:wndwstrt[j]+intlen]; fs = 1/dt)
-                            psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
-                        end
-                        # average spectra
-                        specttmpPSD = vec(mean(psdmatrix,dims=2))
+                if !isempty(Stmp)
+                    # get trace data and delta out
+                    traceTtmp = lf.gettime(Stmp[1])
+                    tracetmp = trace(Stmp[1])
+                    # initialize new data and time vectors
+                    samprate = unique(diff(traceTtmp))
+                    if length(samprate)==1
+                        samprate = samprate[1]
                     else
-                        # use DSP
-                        dt = Dates.value(samprate)/1000
-                        ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
-                        specttmpF = DSP.Periodograms.freq(ptmp)
-                        specttmpPSD = DSP.Periodograms.power(ptmp)
+                        samprate = mode(samprate)
+                        print("WARNING!!! sample rates are not the same!! using mode! \n")
                     end
-                else
-                    # use FFTW
-                    specttmpD = FFTW.rfft(noNaNtrace)
-                    specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
-                    # convert to PSD
-                    specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
+                    # read gain (assuming flat response, not a bad one for BB HRV)
+                    if !isempty(station_gains_file)
+                        global gain_stime = [] # start of time periods
+                        global gain_etime = [] # end of time periods
+                        global gain = [] # gain for that time period (counts / (m/s))
+                        if isempty(gain)# if gains file hasn't been read yet
+                            # read in the gain file
+                            ln = open(station_gains_file) do f
+                                readlines(f)
+                            end
+                            for il = 3:lastindex(ln) # skip header line
+                                commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
+                                push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
+                                push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
+                                push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
+                            end 
+                        end
+                        # find right gain and correct 
+                        traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
+                        for j = 1:lastindex(gain)
+                            tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
+                            if !isempty(tidx)
+                                traceGtmp[tidx] .= gain[j] 
+                            end
+                        end
+                        tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
+                    end
+                    # subtract non-paramteric trend
+                    tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
+                    # get rid of NaNs
+                    noNaNtrace = deepcopy(tracetmp)
+                    noNaNtrace[isnan.(noNaNtrace)] .= mean(filter(!isnan,noNaNtrace))
+                    # calculate fft
+                    if usePeriodogram
+                        if stack10
+                            # get integer index window size and step
+                            intstep = convert(Int,round(Dates.Minute(1)/samprate))
+                            intlen = convert(Int,round(Dates.Minute(10)/samprate))
+                            # get 10 minute windows
+                            wndwstrt = 1:intstep:lastindex(noNaNtrace)-intlen
+                            # initialize periodogram struct
+                            dt = Dates.value(samprate)/1000
+                            ptmp = DSP.Periodograms.periodogram(rand(intlen+1); fs = 1/dt)
+                            specttmpF = DSP.Periodograms.freq(ptmp)
+                            psdmatrix = fill!(Array{Float64,2}(undef,(length(specttmpF),length(wndwstrt))),NaN) 
+                            # use DSP with 10 minute windows
+                            for j = 1:lastindex(wndwstrt)
+                                ptmp = DSP.Periodograms.periodogram(noNaNtrace[wndwstrt[j]:wndwstrt[j]+intlen]; fs = 1/dt)
+                                psdmatrix[:,j] = DSP.Periodograms.power(ptmp)
+                            end
+                            # average spectra
+                            specttmpPSD = vec(mean(psdmatrix,dims=2))
+                        else
+                            # use DSP
+                            dt = Dates.value(samprate)/1000
+                            ptmp = DSP.Periodograms.periodogram(noNaNtrace; fs = 1/dt)
+                            specttmpF = DSP.Periodograms.freq(ptmp)
+                            specttmpPSD = DSP.Periodograms.power(ptmp)
+                        end
+                    else
+                        # use FFTW
+                        specttmpD = FFTW.rfft(noNaNtrace)
+                        specttmpF = FFTW.rfftfreq(length(noNaNtrace),1/(Dates.value(samprate)/1000))
+                        # convert to PSD
+                        specttmpPSD = 2*(1/((Dates.value(samprate)/1000)*length(noNaNtrace))).*(abs.(specttmpD).^2)
+                    end
+                    # plot and write out waveform and spectras
+                    hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="(m/s)",
+                        title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
+                            "; M",newEQmag[i],"; (",newEQlat[i],", ",newEQlon[i],", ",newEQdep[i],
+                            "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
+                    hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
+                        label="raw",xlabel="Period (s)",ylabel="(m/s))^2/Hz",minorgrid=true) 
+                    Nsmth = convert(Int,round(smoothing/mode(diff(specttmpF))))
+                    plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],Nsmth),lc=:red,label="smoothed")
+                    hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
+                    # save data and plot
+                    ID = string(Dates.format(newEQtme[i],"yyyymmdd_HHMM"),"_M",newEQmag[i])
+                    savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
+                    push!(newEQtrace,tracetmp)
+                    push!(newEQtraceT,traceTtmp)
+                    push!(newEQspect,specttmpPSD)
+                    push!(newEQspectF,specttmpF)
+                    push!(newEQmatch,matchID)
+                    push!(newEQID,ID)
+                else # no data from IRIS case
+                    # fill with NaN for the new fields to go back and delete later
+                    push!(newEQtrace,[NaN])
+                    push!(newEQtraceT,[NaN])
+                    push!(newEQspect,[NaN])
+                    push!(newEQspectF,[NaN])
+                    push!(newEQmatch,[NaN])
+                    push!(newEQID,"")
                 end
-                # plot and write out waveform and spectras
-                hpw = plot(traceTtmp,tracetmp,lc=:black,legend=false,ylabel="(m/s)",
-                    title=string(Dates.format(newEQtme[i],"yyyy-mm-ddTHH:MM:SS.sss"),
-                        "; M",newEQmag[i],"; (",newEQlat[i],", ",newEQlon[i],", ",newEQdep[i],
-                        "); ",round(dHRV),"km (",round(dHRV/111.1,digits=2),"deg) -> ",ttime/1000,"s"))
-                hps = plot(1 ./specttmpF[2:end],specttmpPSD[2:end],xaxis=:log,yaxis=:log,lc=:black,
-                    label="raw",xlabel="Period (s)",ylabel="(m/s))^2/Hz",minorgrid=true) 
-                Nsmth = convert(Int,round(smoothing/mode(diff(specttmpF))))
-                plot!(hps,1 ./specttmpF[2:end],movmean(specttmpPSD[2:end],Nsmth),lc=:red,label="smoothed")
-                hpall = plot(hpw,hps,layout=grid(2,1),size=(1000,1000))
-                # save data and plot
-                ID = string(Dates.format(newEQtme[i],"yyyymmdd_HHMM"),"_M",newEQmag[i])
-                savefig(hpall,string(c_dataout,c_runname,"newevents/",ID,".pdf"))
-                push!(newEQtrace,tracetmp)
-                push!(newEQtraceT,traceTtmp)
-                push!(newEQspect,specttmpPSD)
-                push!(newEQspectF,specttmpF)
-                push!(newEQmatch,matchID)
-                push!(newEQID,ID)
-            else # no data from IRIS case
+            else # no station data 
                 # fill with NaN for the new fields to go back and delete later
                 push!(newEQtrace,[NaN])
                 push!(newEQtraceT,[NaN])
@@ -727,6 +744,9 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 scloldspect = lf.unitnorm(oldspect)
                 sclnewspect = lf.unitnorm(newspect)
                 txfrDwghttmp = (scloldspect .+ sclnewspect)./2
+                if logweights
+                    txfrDwghttmp = log10.(txfrDwghttmp)
+                end
                 # get scaling factor we should use (effectively taking out magnitude dependence)
                 if weightAmpByMag
                     newAmpScl = 10^newEQmag[i]
@@ -764,7 +784,7 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 savefig(hpall,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],".pdf"))
                 # save txfr
                 push!(txfrD, txfrDtmp)
-                push!(txfrD, txfrDtmp)
+                push!(txfrDwght, txfrDwghttmp)
                 push!(txfrF, txfrFtmp)
                 push!(txfrID, string(oldEQID[oldidx[j]],"_",newEQID[i]))
             end
@@ -773,12 +793,16 @@ for i in ProgressBar(1:lastindex(newEQtme))
 end
 
 # get bad matches
-if isfile(c_txfr_blist)
-    txfrblist = open(c_txfr_blist) do f
-        readlines(f)
+if !ignoreblist
+    if isfile(c_txfr_blist)
+        txfrblist = open(c_txfr_blist) do f
+            readlines(f)
+        end
     end
+    print(string("Read ",length(txfrblist)," matches to ignore from blist...\n"))
+else
+    txfrblist = ["cat"]
 end
-print(string("Read ",length(txfrblist)," matches to ignore from blist...\n"))
 ## AVERAGE TXFR FUNCS
 print("Averaging transfer functions...\n")
 # get most common freq vector
@@ -797,7 +821,7 @@ for i = 1:lastindex(txfrD)
                 global doInterpolation = false
             end
         end
-        if doInteprolation # inteprolation required    
+        if doInterpolation # inteprolation required    
             gidx = findall(TXFRF[1] .<= txfrF[i] .<= TXFRF[end])
             gidx2 = map(x->argmin(abs.(txfrF[i][gidx[x]].-TXFRF)),1:lastindex(gidx))
             itp = LinearInterpolation(txfrF[i],txfrD[i])
@@ -807,11 +831,18 @@ for i = 1:lastindex(txfrD)
         end
     end
 end
-# get median txfr
-if weightFreqByAmp
-    # perform weighted mean and percentiles
 
-else
+# get median txfr
+if weightFreqByAmp  # perform weighted median and percentiles
+    gidx = map(x->findall((.!isnan.(TXFRM[x,:])).&(.!isnan.(TXFRMwght[x,:]))),1:lastindex(TXFRF))
+    Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
+    TXFRD = map(x->lf.wghtdprctle(TXFRM[x,gidx[x]],TXFRMwght[x,gidx[x]],50,true),1:lastindex(TXFRF))
+    TXFRD_smth = movmean(TXFRD,Nsmth)
+    TXFRD5 = map(x->lf.wghtdprctle(TXFRM[x,gidx[x]],TXFRMwght[x,gidx[x]],5,true),1:lastindex(TXFRF))
+    TXFRD5_smth = movmean(TXFRD5,Nsmth)
+    TXFRD95 = map(x->lf.wghtdprctle(TXFRM[x,gidx[x]],TXFRMwght[x,gidx[x]],95,true),1:lastindex(TXFRF))
+    TXFRD95_smth = movmean(TXFRD95,Nsmth)
+else # perform the standard mean
     Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
     TXFRD = map(x->median(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
     TXFRD_smth = movmean(TXFRD,Nsmth)
