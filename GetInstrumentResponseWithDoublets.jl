@@ -39,7 +39,7 @@ using NaNStatistics
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_noblist_logfrqwght/" # make sure to add '/' to get folder
+c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_logfrqwght_microcorr/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1935_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1988_2024.txt")
@@ -57,6 +57,10 @@ ignoreblist = true # go without filter
 c_oldEQ_blist = string(c_dataout,"oldblist_LPZ_BHZ.txt")
 c_newEQ_blist = string(c_dataout,"newblist_LPZ_BHZ.txt")
 c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
+# microseism climatology
+remove_micro_clmt = true
+c_micro_clmt = string(usr_str,"Desktop/MicroseismClimatology/Window28_Step3_BB_1_100/HRV.BHZ_1987_2023_Climatology_savefile.jld")
+DaysInYear = 365.2422 # tropical year in days
 # theoretical transfer function
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
@@ -700,6 +704,15 @@ txfrID = []
 if !isdir(string(c_dataout,c_runname,"txfrs/"))
     mkdir(string(c_dataout,c_runname,"txfrs/"))
 end
+# load climatology if removing
+if remove_micro_clmt
+    tmpvar = load(c_micro_clmt)
+    Cspectmed = tmpvar["Cspectmed"]
+    Cspectf = tmpvar["spectF"]
+    CspectTfrac = tmpvar["Twindowctrs"]
+    # clear tmpvar
+    tmpvar =  []
+end
 for i in ProgressBar(1:lastindex(newEQtme))
     # print(string("i=",i,"...\n"))
     # check if EQs are on either blist
@@ -753,6 +766,52 @@ for i in ProgressBar(1:lastindex(newEQtme))
                     oldAmpScl = 10^oldEQmag[oldidx[j]]
                     sclfact = newAmpScl / oldAmpScl
                     txfrDtmp = sclfact.*txfrDtmp
+                end
+                # remove microseism climatology effect if applicable
+                if remove_micro_clmt
+                    # save the old txfrDtmp
+                    global txfrDtmp0 = deepcopy(txfrDtmp)
+                    # get the corresponding dates of the old and new spectras as fraction of a year
+                    old_Tfrac = rem(Dates.value(oldEQtme[oldidx[j]])/(1000*60*60*24*DaysInYear),1)
+                    new_Tfrac = rem(Dates.value(newEQtme[i])/(1000*60*60*24*DaysInYear),1)
+                    old_midx = argmin(abs.(CspectTfrac.-old_Tfrac))
+                    new_midx = argmin(abs.(CspectTfrac.-new_Tfrac))
+                    # get corresponding microseism spectras convert back from log
+                    old_mspect = 10 .^(Cspectmed[:,old_midx])   
+                    new_mspect = 10 .^(Cspectmed[:,new_midx])
+                    # divide to get the microseism seasonality effect
+                    mtxfr = sqrt.(old_mspect ./ new_mspect)
+                    # interpolate onto the same frequencies as txfr
+                    if txfrFtmp != Cspectf
+                        # save old one
+                        mtxfr0 = deepcopy(mtxfr)
+                        # initialize new interpolated mtxfr
+                        mtxfr = fill!(Vector{Float64}(undef,length(txfrDtmp)),NaN)
+                        # do 1D interpolation
+                        itpidx = findall(Cspectf[1] .<= txfrFtmp .<= Cspectf[end])# indices of txfrFtmp overlapping Cspectf
+                        itp = LinearInterpolation(Cspectf,mtxfr0)
+                        mtxfr[itpidx] = itp(txfrFtmp[itpidx])
+                    end
+                    # fit by scaling the area under the curve between 2 and 5 seconds
+                    fidx = findall(0.2 .<= txfrFtmp .<= 0.5)
+                    oldarea = sum(oldspect[fidx])
+                    newarea = sum(newspect[fidx])
+                    arearatio = sqrt(oldarea/newarea)
+                    mtxfr1 = mtxfr.*arearatio
+                    # make plot of the spectras and microseismtxfr
+                    hpm1 = plot(1 ./Cspectf,new_mspect,axis=:log,minorgrid=true,xlabel="Period (s)",
+                        label=string("Day ",convert(Int,round(new_Tfrac*DaysInYear))))
+                    plot!(hpm1,1 ./Cspectf,old_mspect,
+                        label=string("Day ",convert(Int,round(old_Tfrac*DaysInYear))))
+                    # make plot of the txfr and microseism correction together
+                    hpm2 = plot(1 ./txfrFtmp[2:end],txfrDtmp0[2:end],axis=:log,minorgrid=true,
+                        label="txfr",xlabel="Period (s)")
+                    plot!(hpm2,1 ./txfrFtmp[2:end],mtxfr1[2:end],label="mtxfr") 
+                    txfrDtmp = txfrDtmp0 .- (mtxfr1 .- mean(filter(!isnan,mtxfr1))) # subtract demeaned mtxfr
+                    plot!(hpm2,1 ./txfrFtmp[2:end],txfrDtmp[2:end],label="txfr-mtxfr") 
+                    # aggregate
+                    hpm_all = plot(hpm1,hpm2,layout=grid(1,2),size=(1000,400))
+                    savefig(hm_all,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],"_micro.pdf"))
                 end
                 # make plot of both waveforms, both spectras, and txfr
                 hpw = plot(Dates.value.(oldEQtraceT[oldidx[j]].-oldEQtraceT[oldidx[j]][1])/(1000*60),
