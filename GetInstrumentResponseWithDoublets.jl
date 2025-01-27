@@ -35,11 +35,13 @@ using Interpolations
 using ProgressBars
 using Geodesics
 using NaNStatistics
+using Measures
+using RobustLeastSquares
 
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_logfrqwght_microcorr/" # make sure to add '/' to get folder
+c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_microcorr/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1935_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1988_2024.txt")
@@ -53,7 +55,7 @@ station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
 c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
 # blacklists (don't use)
-ignoreblist = true # go without filter
+ignoreblist = false # go without filter
 c_oldEQ_blist = string(c_dataout,"oldblist_LPZ_BHZ.txt")
 c_newEQ_blist = string(c_dataout,"newblist_LPZ_BHZ.txt")
 c_txfr_blist = string(c_dataout,"txfrblist_LPZ_BHZ.txt")
@@ -69,7 +71,7 @@ differentiateold = false # treat old data as displacement to get velocity
 usePeriodogram = true # use DSP.periodogram instead of FFTW
 stack10 = true # if using periodogram, this is the option to stack 10 minute spectra to match the other processing
 weightAmpByMag = true # weight the amplitudes by magnitude (scaled by energy)
-weightFreqByAmp = true # weight the contribution of a txfr at a given frequency by the amplitude at that freq
+weightFreqByAmp = false # weight the contribution of a txfr at a given frequency by the amplitude at that freq
 logweights = true # log weights for weighting the frequency median by relative amplitude
 deplim = 50 # deepest limit for depth (km)
 magmin = 5.5 # smallest allowable mag
@@ -86,6 +88,10 @@ hrv_lat = 42.5060
 hrv_lon = -71.5580
 hrvcha = "BHZ" # channel from HRV to use
 smoothing = 0.01 # Hz
+# fitting settings
+plims = [5 20] # period limits for fitting 
+useweights = true # use weights to performs fitting of Q
+fullfit = false # do it with everything vs with just the median
 
 ## SETUP RUNNAME DIR
 if !isdir(string(c_dataout,c_runname))
@@ -792,26 +798,48 @@ for i in ProgressBar(1:lastindex(newEQtme))
                         itp = LinearInterpolation(Cspectf,mtxfr0)
                         mtxfr[itpidx] = itp(txfrFtmp[itpidx])
                     end
-                    # fit by scaling the area under the curve between 2 and 5 seconds
-                    fidx = findall(0.2 .<= txfrFtmp .<= 0.5)
-                    oldarea = sum(oldspect[fidx])
-                    newarea = sum(newspect[fidx])
-                    arearatio = sqrt(oldarea/newarea)
-                    mtxfr1 = mtxfr.*arearatio
+                    # fit by scaling the area under the curve between 2 and 5 seconds 
+                    # NOT USING THIS 20250127 TAL
+                    # fidx = findall(0.2 .<= txfrFtmp .<= 0.5)
+                    # oldarea = sum(oldspect[fidx])
+                    # newarea = sum(newspect[fidx])
+                    # arearatio = sqrt(oldarea/newarea)
+                    # mtxfr1 = mtxfr.*arearatio
                     # make plot of the spectras and microseismtxfr
-                    hpm1 = plot(1 ./Cspectf,new_mspect,axis=:log,minorgrid=true,xlabel="Period (s)",
+                    hpm1 = plot(1 ./Cspectf,new_mspect,xaxis=:log,minorgrid=true,xlabel="Period (s)",
                         label=string("Day ",convert(Int,round(new_Tfrac*DaysInYear))))
                     plot!(hpm1,1 ./Cspectf,old_mspect,
                         label=string("Day ",convert(Int,round(old_Tfrac*DaysInYear))))
+                    # again in log
+                    hpm1l = plot(1 ./Cspectf,new_mspect,axis=:log,minorgrid=true,xlabel="Period (s)",
+                        label=string("Day ",convert(Int,round(new_Tfrac*DaysInYear))))
+                    plot!(hpm1l,1 ./Cspectf,old_mspect,
+                        label=string("Day ",convert(Int,round(old_Tfrac*DaysInYear))))
                     # make plot of the txfr and microseism correction together
-                    hpm2 = plot(1 ./txfrFtmp[2:end],txfrDtmp0[2:end],axis=:log,minorgrid=true,
-                        label="txfr",xlabel="Period (s)")
-                    plot!(hpm2,1 ./txfrFtmp[2:end],mtxfr1[2:end],label="mtxfr") 
-                    txfrDtmp = txfrDtmp0 .- (mtxfr1 .- mean(filter(!isnan,mtxfr1))) # subtract demeaned mtxfr
-                    plot!(hpm2,1 ./txfrFtmp[2:end],txfrDtmp[2:end],label="txfr-mtxfr") 
+                    hpm2 = plot(1 ./txfrFtmp[2:end],txfrDtmp0[2:end],xaxis=:log,minorgrid=true,
+                        label="txfr",xlabel="Period (s)",lc=:blue,
+                        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+                        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+                    axm2b = twinx(hpm2)
+                    plot!(axm2b,1 ./txfrFtmp[2:end],mtxfr[2:end],label="mtxfr",xaxis=:log,
+                        y_guidefontcolor=:red,y_foreground_color_axis=:red,lc=:red,legend=:bottomright,
+                        y_foreground_color_text=:red,y_foreground_color_border=:red,) 
+                    txfrDtmp = txfrDtmp0 ./ mtxfr
+                    plot!(hpm2,1 ./txfrFtmp[2:end],txfrDtmp[2:end],label="mtxfr rmvd",lc=:cyan) 
+                    # again in log
+                    hpm2l = plot(1 ./txfrFtmp[2:end],txfrDtmp0[2:end],axis=:log,minorgrid=true,
+                        label="txfr",xlabel="Period (s)",lc=:blue,
+                        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+                        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+                    axm2bl = twinx(hpm2l)
+                    plot!(axm2bl,1 ./txfrFtmp[2:end],mtxfr[2:end],label="mtxfr",axis=:log,
+                        y_guidefontcolor=:red,y_foreground_color_axis=:red,lc=:red,legend=:bottomright,
+                        y_foreground_color_text=:red,y_foreground_color_border=:red,) 
+                    txfrDtmp = txfrDtmp0 ./ mtxfr
+                    plot!(hpm2l,1 ./txfrFtmp[2:end],txfrDtmp[2:end],label="mtxfr rmvd",lc=:cyan) 
                     # aggregate
-                    hpm_all = plot(hpm1,hpm2,layout=grid(1,2),size=(1000,400))
-                    savefig(hm_all,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],"_micro.pdf"))
+                    hpm_all = plot(hpm1,hpm1l,hpm2,hpm2l,layout=grid(2,2),size=(1000,600),bottom_margin=5mm)
+                    savefig(hpm_all,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],"_micro.pdf"))
                 end
                 # make plot of both waveforms, both spectras, and txfr
                 hpw = plot(Dates.value.(oldEQtraceT[oldidx[j]].-oldEQtraceT[oldidx[j]][1])/(1000*60),
@@ -842,9 +870,10 @@ for i in ProgressBar(1:lastindex(newEQtme))
                 hpall = plot(hpw,hps,hpt,layout=grid(3,1),size=(1000,1000))
                 savefig(hpall,string(c_dataout,c_runname,"txfrs/",oldEQID[oldidx[j]],"_",newEQID[i],".pdf"))
                 # save txfr
-                push!(txfrD, txfrDtmp)
-                push!(txfrDwght, txfrDwghttmp)
-                push!(txfrF, txfrFtmp)
+                fidx = findall(.!isnan.(txfrDtmp))
+                push!(txfrD, txfrDtmp[fidx])
+                push!(txfrDwght, txfrDwghttmp[fidx])
+                push!(txfrF, txfrFtmp[fidx])
                 push!(txfrID, string(oldEQID[oldidx[j]],"_",newEQID[i]))
             end
         end
@@ -918,26 +947,49 @@ plot!(hpt,1 ./TXFRF[2:end],TXFRD5_smth[2:end],lc=:gray54,ls=:dash,label="",)
 plot!(hpt,1 ./TXFRF[2:end],TXFRD95_smth[2:end],lc=:gray54,ls=:dash,label="",)
 plot!(hpt,1 ./TXFRF[2:end],TXFRD[2:end],lc=:black,label="",) 
 plot!(hpt,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)
-hpt2 = plot(1 ./TXFRF[2:end],TXFRD[2:end,:],label="",title=c_runname,
+savefig(hpt,string(c_dataout,c_runname,"txfr.pdf"))
+# plot as heatmap
+grdamp = range(log10(minimum(filter(!isnan,TXFRM))),
+    log10(maximum(filter(!isnan,TXFRM))),51)
+grdp = range(minimum(1 ./TXFRF),maximum(1 ./TXFRF),51)
+TXFRGRD = zeros(length(grdamp)-1,length(grdp)-1)
+for i = 2:lastindex(grdp)
+    fidx = findall(1/grdp[i] .<= TXFRF .<= 1/grdp[i-1])
+    if !isempty(fidx)
+        TXFRGRD[:,i-1] = map(x->sum(grdamp[x-1] .<= log10.(TXFRM[fidx,:]) .<= grdamp[x]),2:lastindex(grdamp))
+    end
+end
+# normalize by period (since the bands are uneven)
+TXFRGRD = TXFRGRD ./ (sum(TXFRGRD,dims=1).+1) # avoid dividing by 0
+hptg = heatmap(grdp,grdamp,TXFRGRD,xlabel="Period (s)",ylabel="Log Amplitude")
+plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end]),lc=:lightgray,label="Empirical",lw=2.5)
+savefig(hptg,string(c_dataout,c_runname,"txfrgrd.pdf"))
+# plot in a plain way
+hpt2l = plot(1 ./TXFRF[2:end],TXFRD[2:end,:],label="",title=c_runname,
     xaxis=:log,yaxis=:log,xminorgrid=true,lc=:black,
     xlabel="Period (s)",ylabel="pixels / (m/s)")    
-# save data and figures
-savefig(hpt,string(c_dataout,c_runname,"txfr.pdf"))
-savefig(hpt2,string(c_dataout,c_runname,"txfr2.pdf"))
-save(string(c_dataout,c_runname,"txfr.jld"),
-    "freq",TXFRF,
-    "txfr",TXFRD,
-    "txfr5",TXFRD5,
-    "txfr95",TXFRD95,
-)
+plot!(hpt2l,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)
+hpt2 = plot(1 ./TXFRF[2:end],TXFRD[2:end,:],label="",title=c_runname,
+    xminorgrid=true,lc=:black,
+    xlabel="Period (s)",ylabel="pixels / (m/s)")    
+plot!(hpt2,1 ./TXFRF[2:end],TXFRD_smth[2:end],lc=:darkred,label="",)
+hpt2all = plot(hpt2,hpt2l,layout=grid(1,2),size=(1000,400),bottom_margin=5mm)
+# save figure
+savefig(hpt2all,string(c_dataout,c_runname,"txfr2.pdf"))
+# and the weights as well
+hpwght = plot(1 ./TXFRF,map(x->median(filter(!isnan,TXFRMwght[x,:])),1:lastindex(TXFRF)),
+    label="",xlabel="Period (s)",title="Weights by Period")
+savefig(hpwght,string(c_dataout,c_runname,"wghts.pdf"))
 
 ## DO THE THEORETICAL TRANSFER FUNCTION
 Trange = 1:0.01:100 # seconds
 Frange = 1 ./Trange
 w = 2*pi./Trange
+wtxfr = 2*pi./(1 ./TXFRF)
 w0 = 2*pi/T0
 wg = 2*pi/Tg
 Q = (w.^2)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2))
+Qtxfr = (wtxfr.^2)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
 # plot empirical transfer function and theoretical one
 fidx = findall(minimum(Frange).<=TXFRF.<=maximum(Frange))
 hptve = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirical 1-100s",
@@ -963,6 +1015,55 @@ plot!(hptvelog20,xaxis=:log)
 hptveall = plot(hptve,hptve20,hptvelog,hptvelog20,layout=grid(2,2),size=(1400,1000))
 savefig(hptveall,string(c_dataout,c_runname,"theoretical_v_empirical.pdf"))
 
+## FIT Q AGAINST TXFRD
+if fullfit
+    A = [reshape(ones(size(TXFRM)).*Qtxfr,length(TXFRM),1) ones(length(TXFRM),1)]
+    b = vec(reshape(TXFRM,length(TXFRM),1))
+    ftmp = vec(reshape(ones(size(TXFRM)).*TXFRF,length(TXFRM),1))
+    if useweights
+        wghts = vec(reshape(TXFRMwght,length(TXFRMwght),1))
+    else
+        wghts = vec(ones(length(TXFRMwght),1))
+    end
+else
+    A = [Qtxfr ones(length(Qtxfr),1)]
+    b = TXFRD_smth
+    ftmp = deepcopy(TXFRF)
+    if useweights
+        wghts = map(x->median(filter(!isnan,TXFRMwght[x,:])),1:lastindex(TXFRF))
+    else
+        wghts = vec(ones(length(TXFRF,1)))
+    end
+end
+gidx = findall(.!isnan.(b))
+gidx2 = findall(plims[1] .<= 1 ./ftmp[gidx] .<= plims[2])
+x = RobustLeastSquares.solve(A[gidx[gidx2],:],b[gidx[gidx2]],wghts[gidx[gidx2]],:qr)
+# add to plots
+TXFRQ = Qtxfr.*x[1] .+ x[2]
+hpfit = scatter(A[gidx[gidx2],1],b[gidx[gidx2]],zcolor=1 ./ftmp[gidx[gidx2]],label="",
+    xlabel="Theoretical",ylabel="Empirical",colorbar_title="\nPeriod (s)",right_margin=10mm)
+plot!(hpfit,A[gidx[gidx2],1],A[gidx[gidx2],1].*x[1] .+ x[2],
+    label=string("m=",x[1],", b=",x[2]),legend=:outerbottom)
+savefig(hpfit,string(c_dataout,c_runname,"theoretical_fit.pdf"))
+#plot(1 ./TXFRF[2:end],TXFRQ[2:end])
+plot!(hpt,1 ./TXFRF[2:end],TXFRQ[2:end],lw=2,label="Theoretical Fit",)
+plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRQ[2:end]),lw=2,label="Theoretical Fit",)
+plot!(hpt2,1 ./TXFRF[2:end],TXFRQ[2:end],lw=2,label="Theoretical Fit",)
+plot!(hpt2l,1 ./TXFRF[2:end],TXFRQ[2:end],lw=2,label="Theoretical Fit",)
+hpt2all = plot(hpt2,hpt2l,layout=grid(1,2),size=(1000,400),bottom_margin=5mm)
+# save figures again
+savefig(hpt,string(c_dataout,c_runname,"txfr_fit.pdf"))
+savefig(hptg,string(c_dataout,c_runname,"txfrgrd_fit.pdf"))
+savefig(hpt2all,string(c_dataout,c_runname,"txfr2_fit.pdf"))
+
+## WRITE OUT DATA
+save(string(c_dataout,c_runname,"txfr.jld"),
+    "freq",TXFRF,
+    "txfr",TXFRD,
+    "txfrQ",TXFRQ,
+    "txfr5",TXFRD5,
+    "txfr95",TXFRD95,
+)
 
 # finish
 print("Done!\n")
