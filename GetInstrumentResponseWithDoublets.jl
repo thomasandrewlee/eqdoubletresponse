@@ -51,6 +51,9 @@ c_HRV_save = string(usr_str,"Downloads/1936_40_HRV_TIMESERIES/1936_40_HRV_LPZ_TI
 # HRV manual gain correction
 station_gains_file = [] # use this empty to avoid correcting gains
 station_gains_file = string(usr_str,"Research/HRV_BHZ_Gain.txt")
+station_gains_file = string(usr_str,"Research/SACPZ_HRV_19880101_today.txt")
+station_gains_SACPZ = true # if the gains are in a SAC PZ format
+use_baro = false
 # EQ save files
 c_oldEQ_save = string(c_dataout,c_runname,"HRV_1936_1940_LPZ_oldEQ.jld")
 c_newEQ_save = string(c_dataout,c_runname,"HRV_1988_2023_BHZ_newEQ.jld")
@@ -66,6 +69,8 @@ DaysInYear = 365.2422 # tropical year in days
 # theoretical transfer function
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
+eg = 20 # galvanometer damping
+dampingcritical = false
 # search parameters
 differentiateold = false # treat old data as displacement to get velocity
 usePeriodogram = true # use DSP.periodogram instead of FFTW
@@ -556,33 +561,106 @@ else
                         samprate = mode(samprate)
                         print("WARNING!!! sample rates are not the same!! using mode! \n")
                     end
+
+                    # YOU ARE HERE!!!!
+
                     # read gain (assuming flat response, not a bad one for BB HRV)
                     if !isempty(station_gains_file)
-                        global gain_stime = [] # start of time periods
-                        global gain_etime = [] # end of time periods
-                        global gain = [] # gain for that time period (counts / (m/s))
-                        if isempty(gain)# if gains file hasn't been read yet
-                            # read in the gain file
-                            ln = open(station_gains_file) do f
-                                readlines(f)
+                        if station_gains_SACPZ # if sac pz files
+                            # transform trace into the spectral domain
+
+                            # read gains
+                            stimetmp, etimetmp, gaintmp, ptmp, txfrtmp, htmp = lf.readsacpz(
+                                        station_gains_file,freqtmp,true,false)
+                            # divide by txfrtmp
+
+                            # ifft back to time domain
+                            
+                        else
+                            global gain_stime = [] # start of time periods
+                            global gain_etime = [] # end of time periods
+                            global gain = [] # gain for that time period (counts / (m/s))
+                            if isempty(gain)# if gains file hasn't been read yet
+                                # read in the gain file
+                                ln = open(station_gains_file) do f
+                                    readlines(f)
+                                end
+                                for il = 3:lastindex(ln) # skip header line
+                                    commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
+                                    push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
+                                    push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
+                                    push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
+                                end 
                             end
-                            for il = 3:lastindex(ln) # skip header line
-                                commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
-                                push!(gain_stime,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
-                                push!(gain_etime,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
-                                push!(gain,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
-                            end 
-                        end
-                        # find right gain and correct 
-                        traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
-                        for j = 1:lastindex(gain)
-                            tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
-                            if !isempty(tidx)
-                                traceGtmp[tidx] .= gain[j] 
+                            # find right gain and correct 
+                            traceGtmp = fill!(Vector{Float64}(undef,length(tracetmp)),NaN)
+                            for j = 1:lastindex(gain)
+                                tidx = findall(gain_stime[j] .<= traceTtmp .<= gain_etime[j])
+                                if !isempty(tidx)
+                                    traceGtmp[tidx] .= gain[j] 
+                                end
                             end
+                            tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
                         end
-                        tracetmp = tracetmp ./ traceGtmp # convert from counts to m/s
                     end
+
+                    # correct gain (assuming flat response, not a bad one for VBB HRV)
+                    if !isempty(station_gains_file)
+                        if station_gains_SACPZ
+                            spectG = map(x->fill!(Array{Float64,2}(undef,(length(spectF[x]),length(spectT[x]))),NaN),1:lastindex(spectT))
+                        else
+                            spectG = map(x->fill!(Array{Float64,2}(undef,length(spectT[x])),NaN),1:lastindex(spectT)) # initialize gain array
+                        end
+                        for i = 1:lastindex(spectD)
+                            if names[i]=="HRV.BHZ" # currently only gains for HRV.BHZ were grabbed
+                                if station_gains_SACPZ
+                                    # read gains
+                                    stimetmp, etimetmp, gaintmp, ptmp, htmp = lf.readsacpz(
+                                        station_gains_file,spectF[i],true,true)
+                                    if !isdir(string(cDataOut,"responses/"))
+                                        mkdir(string(cDataOut,"responses/"))
+                                    end
+                                    for j = 1:lastindex(htmp)
+                                        savefig(htmp[j],string(cDataOut,"responses/",
+                                            Dates.format(stimetmp[j],"yyyymmdd"),"_",
+                                            Dates.format(etimetmp[j],"yyyymmdd"),".pdf"))
+                                    end
+                                else
+                                    # read in the gain file
+                                    ln = open(station_gains_file) do f
+                                        readlines(f)
+                                    end
+                                    stimetmp = [] # start of time periods
+                                    etimetmp = [] # end of time periods
+                                    gaintmp = [] # gain for that time period (counts / (m/s))
+                                    for il = 3:lastindex(ln) # skip header line
+                                        commas = findall(map(x->ln[il][x]==',',1:lastindex(ln[il])))
+                                        push!(stimetmp,Dates.DateTime(ln[il][1:commas[1]-1],Dates.dateformat"yyyy-mm-dd"))
+                                        push!(etimetmp,Dates.DateTime(ln[il][commas[1]+1:commas[2]-1],Dates.dateformat"yyyy-mm-dd"))
+                                        push!(gaintmp,parse(Float64,ln[il][commas[5]+1:commas[6]-1]))
+                                    end 
+                                end
+                                # loop over the periods and set gains
+                                for j = 1:lastindex(gaintmp)
+                                    tidx = findall(stimetmp[j] .<= spectT[i] .<=etimetmp[j])
+                                    if !isempty(tidx)
+                                        if station_gains_SACPZ
+                                            spectG[i][:,tidx] .= gaintmp[j] 
+                                        else
+                                            spectG[i][tidx] .= gaintmp[j] 
+                                        end
+                                    end
+                                end
+                                # divide by gain squared to get (m/s)^2 / Hz from counts^2 / Hz
+                                spectD[i] = spectD[i] ./ (spectG[i].^2)
+                            else
+                                error("STOP! YOU NEED GAINS FOR A STATION THAT IS NOT HRV!!")
+                            end
+                        end
+                    end
+
+
+
                     # subtract non-paramteric trend
                     tracetmp = tracetmp .- movmean(tracetmp,convert(Int,round(length(tracetmp)/10)))
                     # get rid of NaNs
@@ -1017,8 +1095,13 @@ w = 2*pi./Trange
 wtxfr = 2*pi./(1 ./TXFRF)
 w0 = 2*pi/T0
 wg = 2*pi/Tg
-Q = (w.^3)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2)) # EQ 30 benioff 1932
-Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
+if dampingcritical
+    Q = (w.^3)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2)) # EQ 30 benioff 1932
+    Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
+else
+    Q = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg^2)*w.^2)) # EQ 27 benioff 1932
+    Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg^2)*wtxfr.^2))
+end
 # plot empirical transfer function and theoretical one
 fidx = findall(minimum(Frange).<=TXFRF.<=maximum(Frange))
 hptve = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirical 1-100s",
