@@ -1148,56 +1148,66 @@ plot!(hptvelog20,xaxis=:log)
 hptveall = plot(hptve,hptve20,hptvelog,hptvelog20,layout=grid(2,2),size=(1400,1000))
 savefig(hptveall,string(c_dataout,c_runname,"theoretical_v_empirical.pdf"))
 # plot just theoretical
-hptheor = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",
-    xaxis=:log,minorgrid=true,lc=:black,label="",title=string("T0=",T0," Tg=",Tg))
-savefig(hptheor,string(c_dataout,c_runname,"theoretical.pdf"))
-hptheorl = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",xlim=(0,32),
-    yaxis=:log,minorgrid=true,lc=:black,label="",title=string("T0=",T0," Tg=",Tg))
-savefig(hptheorl,string(c_dataout,c_runname,"theoretical_log_benioff.pdf"))
+if length(eg)>1 & dampingcritical
+    hptheor = plot(1 ./Frange[2:end],Q[2:end,:],xlabel="Period (s)",ylabel="Q",
+        xaxis=:log,minorgrid=true,label=string.(eg),title=string("T0=",T0," Tg=",Tg))
+    savefig(hptheor,string(c_dataout,c_runname,"theoretical.pdf"))
+    hptheorl = plot(1 ./Frange[2:end],Q[2:end,:],xlabel="Period (s)",ylabel="Q",xlim=(0,32),
+        yaxis=:log,minorgrid=true,label=string.(eg),title=string("T0=",T0," Tg=",Tg))
+    savefig(hptheorl,string(c_dataout,c_runname,"theoretical_log_benioff.pdf"))
+else
+    hptheor = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",
+        xaxis=:log,minorgrid=true,lc=:black,label="",title=string("T0=",T0," Tg=",Tg))
+    savefig(hptheor,string(c_dataout,c_runname,"theoretical.pdf"))
+    hptheorl = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",xlim=(0,32),
+        yaxis=:log,minorgrid=true,lc=:black,label="",title=string("T0=",T0," Tg=",Tg))
+    savefig(hptheorl,string(c_dataout,c_runname,"theoretical_log_benioff.pdf"))
+end
 
 ## FIT Q AGAINST TXFRD
 if !dampingcritical | length(eg)==1
-if fullfit
-    A = [reshape(ones(size(TXFRM)).*Qtxfr,length(TXFRM),1) ones(length(TXFRM),1)]
-    b = vec(reshape(TXFRM,length(TXFRM),1))
-    ftmp = vec(reshape(ones(size(TXFRM)).*TXFRF,length(TXFRM),1))
-    if useweights
-        wghts = vec(reshape(TXFRMwght,length(TXFRMwght),1))
+    if fullfit
+        A = [reshape(ones(size(TXFRM)).*Qtxfr,length(TXFRM),1) ones(length(TXFRM),1)]
+        b = vec(reshape(TXFRM,length(TXFRM),1))
+        ftmp = vec(reshape(ones(size(TXFRM)).*TXFRF,length(TXFRM),1))
+        if useweights
+            wghts = vec(reshape(TXFRMwght,length(TXFRMwght),1))
+        else
+            wghts = vec(ones(length(TXFRMwght),1))
+        end
     else
-        wghts = vec(ones(length(TXFRMwght),1))
+        A = [Qtxfr ones(length(Qtxfr),1)]
+        b = TXFRD_smth
+        ftmp = deepcopy(TXFRF)
+        if useweights
+            wghts = map(x->median(filter(!isnan,TXFRMwght[x,:])),1:lastindex(TXFRF))
+        else
+            wghts = vec(ones(length(TXFRF,1)))
+        end
     end
-else
-    A = [Qtxfr ones(length(Qtxfr),1)]
-    b = TXFRD_smth
-    ftmp = deepcopy(TXFRF)
-    if useweights
-        wghts = map(x->median(filter(!isnan,TXFRMwght[x,:])),1:lastindex(TXFRF))
-    else
-        wghts = vec(ones(length(TXFRF,1)))
-    end
+    gidx = findall(.!isnan.(b))
+    gidx2 = findall(plims[1] .<= 1 ./ftmp[gidx] .<= plims[2])
+    x = RobustLeastSquares.solve(A[gidx[gidx2],:],b[gidx[gidx2]],wghts[gidx[gidx2]],:qr)
+    # add to plots
+    TXFRQ = Qtxfr.*x[1] .+ x[2]
+    hpfit = scatter(A[gidx[gidx2],1],b[gidx[gidx2]],zcolor=1 ./ftmp[gidx[gidx2]],label="",
+        xlabel="Theoretical",ylabel="Empirical",colorbar_title="\nPeriod (s)",right_margin=10mm)
+    plot!(hpfit,A[gidx[gidx2],1],A[gidx[gidx2],1].*x[1] .+ x[2],
+        label=string("m=",x[1],", b=",x[2]),legend=:outerbottom)
+    savefig(hpfit,string(c_dataout,c_runname,"theoretical_fit.pdf"))
+    #plot(1 ./TXFRF[2:end],TXFRQ[2:end])
+    plot!(hpt,1 ./TXFRF[2:end],TXFRQ[2:end],lw=2,label="Theoretical Fit",)
+    plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRQ[2:end]),lw=2,label="Theoretical Fit",)
+    plot!(hptgl,log10.(1 ./TXFRF[2:end]),log10.(TXFRQ[2:end]),lw=2,label="Theoretical Fit",)
+    plot!(hpt2,1 ./TXFRF[pltidx],TXFRQ[pltidx],lw=2,label="Theoretical Fit",)
+    plot!(hpt2l,1 ./TXFRF[pltidx],TXFRQ[pltidx],lw=2,label="Theoretical Fit",)
+    hpt2all = plot(hpt2,hpt2l,layout=grid(1,2),size=(1000,400),bottom_margin=5mm)
+    # save figures again
+    savefig(hpt,string(c_dataout,c_runname,"txfr_fit.pdf"))
+    savefig(hptg,string(c_dataout,c_runname,"txfrgrd_fit.pdf"))
+    savefig(hptgl,string(c_dataout,c_runname,"txfrgrdl_fit.pdf"))
+    savefig(hpt2all,string(c_dataout,c_runname,"txfr2_fit.pdf"))
 end
-gidx = findall(.!isnan.(b))
-gidx2 = findall(plims[1] .<= 1 ./ftmp[gidx] .<= plims[2])
-x = RobustLeastSquares.solve(A[gidx[gidx2],:],b[gidx[gidx2]],wghts[gidx[gidx2]],:qr)
-# add to plots
-TXFRQ = Qtxfr.*x[1] .+ x[2]
-hpfit = scatter(A[gidx[gidx2],1],b[gidx[gidx2]],zcolor=1 ./ftmp[gidx[gidx2]],label="",
-    xlabel="Theoretical",ylabel="Empirical",colorbar_title="\nPeriod (s)",right_margin=10mm)
-plot!(hpfit,A[gidx[gidx2],1],A[gidx[gidx2],1].*x[1] .+ x[2],
-    label=string("m=",x[1],", b=",x[2]),legend=:outerbottom)
-savefig(hpfit,string(c_dataout,c_runname,"theoretical_fit.pdf"))
-#plot(1 ./TXFRF[2:end],TXFRQ[2:end])
-plot!(hpt,1 ./TXFRF[2:end],TXFRQ[2:end],lw=2,label="Theoretical Fit",)
-plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRQ[2:end]),lw=2,label="Theoretical Fit",)
-plot!(hptgl,log10.(1 ./TXFRF[2:end]),log10.(TXFRQ[2:end]),lw=2,label="Theoretical Fit",)
-plot!(hpt2,1 ./TXFRF[pltidx],TXFRQ[pltidx],lw=2,label="Theoretical Fit",)
-plot!(hpt2l,1 ./TXFRF[pltidx],TXFRQ[pltidx],lw=2,label="Theoretical Fit",)
-hpt2all = plot(hpt2,hpt2l,layout=grid(1,2),size=(1000,400),bottom_margin=5mm)
-# save figures again
-savefig(hpt,string(c_dataout,c_runname,"txfr_fit.pdf"))
-savefig(hptg,string(c_dataout,c_runname,"txfrgrd_fit.pdf"))
-savefig(hptgl,string(c_dataout,c_runname,"txfrgrdl_fit.pdf"))
-savefig(hpt2all,string(c_dataout,c_runname,"txfr2_fit.pdf"))
 
 ## WRITE OUT DATA
 save(string(c_dataout,c_runname,"txfr.jld"),
@@ -1210,3 +1220,4 @@ save(string(c_dataout,c_runname,"txfr.jld"),
 
 # finish
 print("Done!\n")
+
