@@ -69,7 +69,7 @@ DaysInYear = 365.2422 # tropical year in days
 # theoretical transfer function
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
-eg = 20 # galvanometer damping
+eg = 1:20 # galvanometer damping
 dampingcritical = false
 # search parameters
 differentiateold = false # treat old data as displacement to get velocity
@@ -1099,17 +1099,32 @@ if dampingcritical
     Q = (w.^3)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2)) # EQ 30 benioff 1932
     Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
 else
-    Q = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg^2)*w.^2)) # EQ 27 benioff 1932
-    Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg^2)*wtxfr.^2))
+    if length(eg)==1
+        global Q = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg^2)*w.^2)) # EQ 27 benioff 1932
+        global Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg^2)*wtxfr.^2))
+    else
+        global Q = fill!(Array{Float64,2}(undef,(length(w),length(eg))),NaN)
+        global Qtxfr = fill!(Array{Float64,2}(undef,(length(wtxfr),length(eg))),NaN)
+        for i = 1:lastindex(eg)
+            Q[:,i] = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg[i]^2)*w.^2)) # EQ 27 benioff 1932
+            Qtxfr[:,i] = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg[i]^2)*wtxfr.^2))
+        end
+    end
 end
 # plot empirical transfer function and theoretical one
 fidx = findall(minimum(Frange).<=TXFRF.<=maximum(Frange))
 hptve = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirical 1-100s",
     xminorgrid=true,lc=:black,xlabel="Period (s)",ylabel="pixels / (m/s)") 
 ax2tve = twinx(hptve)
-plot!(ax2tve,Trange,Q,lc=:blue,lw=1.5,label="Theoretical",
-    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
-    y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+if length(eg)>1 & dampingcritical
+    plot!(ax2tve,Trange,Q,lw=1.5,label=string.(eg),
+        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+else
+    plot!(ax2tve,Trange,Q,lc=:blue,lw=1.5,label="Theoretical",
+        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+end
 hptvelog = deepcopy(hptve)
 plot!(hptvelog,xaxis=:log)
 # 20 second version
@@ -1118,9 +1133,15 @@ hptve20 = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empiri
     xminorgrid=true,lc=:black,xlabel="Period (s)",ylabel="pixels / (m/s)") 
 ax2tve20 = twinx(hptve20)
 fidx2 = findall(Trange.<=20)
-plot!(ax2tve20,Trange[fidx2],Q[fidx2],lc=:blue,lw=1.5,label="Theoretical",
-    y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
-    y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+if length(eg)>1 & dampingcritical
+    plot!(ax2tve20,Trange[fidx2],Q[fidx2,:],lw=1.5,label=string.(eg),
+        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+else
+    plot!(ax2tve20,Trange[fidx2],Q[fidx2],lc=:blue,lw=1.5,label="Theoretical",
+        y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
+        y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
+end
 hptvelog20 = deepcopy(hptve20)
 plot!(hptvelog20,xaxis=:log)
 # aggregate
@@ -1135,6 +1156,7 @@ hptheorl = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",xlim=(
 savefig(hptheorl,string(c_dataout,c_runname,"theoretical_log_benioff.pdf"))
 
 ## FIT Q AGAINST TXFRD
+if !dampingcritical | length(eg)==1
 if fullfit
     A = [reshape(ones(size(TXFRM)).*Qtxfr,length(TXFRM),1) ones(length(TXFRM),1)]
     b = vec(reshape(TXFRM,length(TXFRM),1))
