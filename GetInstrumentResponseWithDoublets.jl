@@ -69,7 +69,7 @@ DaysInYear = 365.2422 # tropical year in days
 # theoretical transfer function
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
-eg = 1:20 # galvanometer damping
+eg = [1/50, 1/20, 1/10, 1/5, 1/2, 1, 2, 5] # galvanometer damping
 dampingcritical = false
 # search parameters
 differentiateold = false # treat old data as displacement to get velocity
@@ -1117,7 +1117,7 @@ hptve = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empirica
     xminorgrid=true,lc=:black,xlabel="Period (s)",ylabel="pixels / (m/s)") 
 ax2tve = twinx(hptve)
 if length(eg)>1 & dampingcritical
-    plot!(ax2tve,Trange,Q,lw=1.5,label=string.(eg),
+    plot!(ax2tve,Trange,Q,lw=1.5,label=eg',
         y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
         y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
 else
@@ -1134,7 +1134,7 @@ hptve20 = plot(1 ./TXFRF[fidx],TXFRD[fidx],label="",title="Theoretical vs Empiri
 ax2tve20 = twinx(hptve20)
 fidx2 = findall(Trange.<=20)
 if length(eg)>1 & dampingcritical
-    plot!(ax2tve20,Trange[fidx2],Q[fidx2,:],lw=1.5,label=string.(eg),
+    plot!(ax2tve20,Trange[fidx2],Q[fidx2,:],lw=1.5,label=eg',
         y_guidefontcolor=:blue,y_foreground_color_axis=:blue,
         y_foreground_color_text=:blue,y_foreground_color_border=:blue,)
 else
@@ -1150,10 +1150,10 @@ savefig(hptveall,string(c_dataout,c_runname,"theoretical_v_empirical.pdf"))
 # plot just theoretical
 if length(eg)>1 & dampingcritical
     hptheor = plot(1 ./Frange[2:end],Q[2:end,:],xlabel="Period (s)",ylabel="Q",
-        xaxis=:log,minorgrid=true,label=string.(eg),title=string("T0=",T0," Tg=",Tg))
+        xaxis=:log,minorgrid=true,label=eg',title=string("T0=",T0," Tg=",Tg))
     savefig(hptheor,string(c_dataout,c_runname,"theoretical.pdf"))
     hptheorl = plot(1 ./Frange[2:end],Q[2:end,:],xlabel="Period (s)",ylabel="Q",xlim=(0,32),
-        yaxis=:log,minorgrid=true,label=string.(eg),title=string("T0=",T0," Tg=",Tg))
+        yaxis=:log,minorgrid=true,label=eg',title=string("T0=",T0," Tg=",Tg))
     savefig(hptheorl,string(c_dataout,c_runname,"theoretical_log_benioff.pdf"))
 else
     hptheor = plot(1 ./Frange[2:end],Q[2:end],xlabel="Period (s)",ylabel="Q",
