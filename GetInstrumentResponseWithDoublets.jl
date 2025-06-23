@@ -13,6 +13,11 @@ The workflow is to:
 5) remove instrument response from the modern data (just make correction of gain manually to get to m/s)
 6) calculate the PSD for the surface wave times for both modern and historical
 7) calculate the transfer function for these PSDs
+
+Last Modified: 6/18/2025
+- adding another option for theoretical formulation to follow the equation for Q given in the capture of 
+  figure 7 in Benioffs 1951 review paper (previously the 1935 paper's eq 27 was used)
+
 =#
 
 ## USER STRING
@@ -41,7 +46,7 @@ using RobustLeastSquares
 ## SETTINGS
 # data output directory
 c_dataout = string(usr_str,"Desktop/EQDoub/")
-c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_microcorr/" # make sure to add '/' to get folder
+c_runname = "M5.5_LPZ_BHZ_ampscl_stack10_microcorr_WWSSN/" # make sure to add '/' to get folder
 # ISC data files
 c_old_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1935_1941.txt")
 c_new_ISC = string(usr_str,"Research/FindEQDoublets/ISC_M5.5_1988_2024.txt")
@@ -67,10 +72,15 @@ remove_micro_clmt = true
 c_micro_clmt = string(usr_str,"Desktop/MicroseismClimatology/Window28_Step3_BB_1_100/HRV.BHZ_1987_2023_Climatology_savefile.jld")
 DaysInYear = 365.2422 # tropical year in days
 # theoretical transfer function
+theoreticalform = "wwssn" # benioff35 or wwssn; wwssn requires both e0 and eg, dampingcritical doesn't apply
 T0 = 1 # seismometer period (seconds)
 Tg = 14 # galvanometer period (seconds)
-eg = [1/50, 1/20, 1/10, 1/5, 1/2, 1, 2, 5] # galvanometer damping
-dampingcritical = false
+eg = [1/500, 1/200, 1/100, 1/50, 1/20, 1/10, 1/5, 1/2, 1, 2, 5, 10, 20, 50] # galvanometer damping (ratio for wwssn, constant for benioff) (dampingcritical overrides this if using '35)
+#eg = [1/10000,1/1000,1/100,1/10,1,10,100,1000]
+#e0 = 1
+e0 = 20/(2*pi/T0) # seismometer damping ratio, not vectorizable at this time (benioff '32 gives a constant, so e0/w0 is the ratio)
+sigma2 = 0 # sigma squared coupling factor for wwssn (peterson 2014, A1.65)
+dampingcritical = false # this applies to the galvanometer damping if using the 1935 formula
 # search parameters
 differentiateold = false # treat old data as displacement to get velocity
 usePeriodogram = true # use DSP.periodogram instead of FFTW
@@ -1095,21 +1105,42 @@ w = 2*pi./Trange
 wtxfr = 2*pi./(1 ./TXFRF)
 w0 = 2*pi/T0
 wg = 2*pi/Tg
-if dampingcritical
-    Q = (w.^3)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2)) # EQ 30 benioff 1932
-    Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
-else
-    if length(eg)==1
-        global Q = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg^2)*w.^2)) # EQ 27 benioff 1932
-        global Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg^2)*wtxfr.^2))
+if theoreticalform=="benioff35"
+    if dampingcritical
+        Q = (w.^3)./((w0^2 .+ w.^2).*(wg^2 .+ w.^2)) # EQ 30 benioff 1932
+        Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*(wg^2 .+ wtxfr.^2))
+    else
+        if length(eg)==1
+            global Q = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg^2)*w.^2)) # EQ 27 benioff 1932
+            global Qtxfr = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg^2)*wtxfr.^2))
+        else
+            global Q = fill!(Array{Float64,2}(undef,(length(w),length(eg))),NaN)
+            global Qtxfr = fill!(Array{Float64,2}(undef,(length(wtxfr),length(eg))),NaN)
+            for i = 1:lastindex(eg)
+                Q[:,i] = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg[i]^2)*w.^2)) # EQ 27 benioff 1932
+                Qtxfr[:,i] = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg[i]^2)*wtxfr.^2))
+            end
+        end
+    end
+elseif theoreticalform=="wwssn"
+    # YOU ARE HERE!!!!
+    if length(eg)==1 
+        global Q = w./((w.^2 .+ 2 .*e0.*w0.*w .+ w0.^2).*(w.^2 .+ 2 .*eg.*wg.*w .+ wg.^2)-
+            (4 .*e0.*w0.*eg.*wg.*sigma2.*(w.^2)))# Peterson 2014 WWSSN A1.67 (ignoring sensitivity)
+        global Qtxfr = wtxfr./((wtxfr.^2 .+ 2 .*e0.*w0.*wtxfr .+ w0.^2).*(wtxfr.^2 .+ 2 .*eg.*wg.*wtxfr .+ wg.^2)-
+        (4 .*e0.*w0.*eg.*wg.*sigma2.*(wtxfr.^2)))# Peterson 2014 WWSSN A1.67 (ignoring sensitivity)
     else
         global Q = fill!(Array{Float64,2}(undef,(length(w),length(eg))),NaN)
         global Qtxfr = fill!(Array{Float64,2}(undef,(length(wtxfr),length(eg))),NaN)
         for i = 1:lastindex(eg)
-            Q[:,i] = (w.^3)./((w0^2 .+ w.^2).*sqrt.((wg^2 .- w.^2).^2 .+ 4*(eg[i]^2)*w.^2)) # EQ 27 benioff 1932
-            Qtxfr[:,i] = (wtxfr.^3)./((w0^2 .+ wtxfr.^2).*sqrt.((wg^2 .- wtxfr.^2).^2 .+ 4*(eg[i]^2)*wtxfr.^2))
+            Q[:,i] = w./((w.^2 .+ 2 .*e0.*w0.*w .+ w0.^2).*(w.^2 .+ 2 .*eg[i].*wg.*w .+ wg.^2)-
+            (4 .*e0.*w0.*eg[i].*wg.*sigma2.*(w.^2)))
+            Qtxfr[:,i] = wtxfr./((wtxfr.^2 .+ 2 .*e0.*w0.*wtxfr .+ w0.^2).*(wtxfr.^2 .+ 2 .*eg[i].*wg.*wtxfr .+ wg.^2)-
+            (4 .*e0.*w0.*eg[i].*wg.*sigma2.*(wtxfr.^2)))
         end
-    end
+    end 
+else
+    error("''theoreticalform'' not recognized!")
 end
 # plot empirical transfer function and theoretical one
 fidx = findall(minimum(Frange).<=TXFRF.<=maximum(Frange))
