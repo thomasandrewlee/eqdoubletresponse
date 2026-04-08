@@ -38,7 +38,6 @@ using StatsBase
 using Dates
 using Interpolations
 using ProgressBars
-using Geodesics
 using NaNStatistics
 using Measures
 using RobustLeastSquares
@@ -1024,6 +1023,7 @@ if weightFreqByAmp  # perform weighted median and percentiles
     TXFRD5_smth = movmean(TXFRD5,Nsmth)
     TXFRD95 = map(x->lf.wghtdprctle(TXFRM[x,gidx[x]],TXFRMwght[x,gidx[x]],95,true),1:lastindex(TXFRF))
     TXFRD95_smth = movmean(TXFRD95,Nsmth)
+    TXFRstd = map(x->std(TXFRM[x,gidx[x]]),1:lastindex(TXFRF))
 else # perform the standard mean
     Nsmth = convert(Int,round(smoothing/mode(diff(TXFRF))))
     TXFRD = map(x->median(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
@@ -1032,6 +1032,7 @@ else # perform the standard mean
     TXFRD5_smth = movmean(TXFRD5,Nsmth)
     TXFRD95 = map(x->percentile(filter(!isnan,TXFRM[x,:]),95),1:lastindex(TXFRF))
     TXFRD95_smth = movmean(TXFRD95,Nsmth)
+    TXFRstd = map(x->std(filter(!isnan,TXFRM[x,:])),1:lastindex(TXFRF))
 end
 # plot transfers
 hpt = plot(1 ./TXFRF[2:end],TXFRM[2:end,:],label="",title=c_runname,
@@ -1058,6 +1059,8 @@ end
 TXFRGRD = TXFRGRD ./ (sum(TXFRGRD,dims=1).+1) # avoid dividing by 0
 hptg = heatmap(grdp,grdamp,TXFRGRD,xlabel="Period (s)",ylabel="Log Amplitude",xlim=plotxlim,)
 plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end]),lc=:lightgray,label="Empirical",lw=2.5)
+plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end])-log10.(TXFRstd[2:end]),lc=:lightgray,ls=:dash,label="1-sigma",lw=1)
+plot!(hptg,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end])+log10.(TXFRstd[2:end]),lc=:lightgray,ls=:dash,label="",lw=1)
 savefig(hptg,string(c_dataout,c_runname,"txfrgrd.pdf"))
 # do the same thing with a log scale
 grdamp = range(log10(minimum(filter(!isnan,TXFRM))),
@@ -1075,6 +1078,8 @@ end
 TXFRGRDl = TXFRGRDl ./ (sum(TXFRGRDl,dims=1).+1) # avoid dividing by 0
 hptgl = heatmap(grdpl[2:end],grdamp[2:end],TXFRGRDl,xlabel="Log Period (s)",ylabel="Log Amplitude",xlim=log10.(plotxlim),)
 plot!(hptgl,log10.(1 ./TXFRF[2:end]),log10.(TXFRD_smth[2:end]),lc=:lightgray,label="Empirical",lw=2.5)
+plot!(hptgl,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end])-log10.(TXFRstd[2:end]),lc=:lightgray,ls=:dash,label="1-sigma",lw=1)
+plot!(hptgl,1 ./TXFRF[2:end],log10.(TXFRD_smth[2:end])+log10.(TXFRstd[2:end]),lc=:lightgray,ls=:dash,label="",lw=1)
 savefig(hptgl,string(c_dataout,c_runname,"txfrgrdl.pdf"))
 # plot in a plain way
 pltidx = findall(plotxlim[1] .<= (1 ./TXFRF) .<= plotxlim[2])
